@@ -2,18 +2,23 @@
 -- Run this once in the Supabase SQL Editor to configure your new project.
 -- ---------------------------------------------------------------------------
 
--- 1. Custom Types & Enums
-create type public.user_role as enum (
-  'admin',
-  'student',
-  'student_support',
-  'technical',
-  'operations',
-  'academic'
-);
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'user_role' and typnamespace = 'public'::regnamespace) then
+    create type public.user_role as enum (
+      'admin',
+      'student',
+      'student_support',
+      'technical',
+      'operations',
+      'academic'
+    );
+  end if;
+end
+$$;
 
 -- 2. Profiles (linked to Supabase Auth)
-create table public.profiles (
+create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   email text not null,
   username text not null unique,
@@ -22,8 +27,8 @@ create table public.profiles (
   created_at timestamptz not null default now()
 );
 
-create index profiles_role_idx on public.profiles (role);
-create index profiles_username_idx on public.profiles (username);
+create index if not exists profiles_role_idx on public.profiles (role);
+create index if not exists profiles_username_idx on public.profiles (username);
 
 -- Auto-create profile on signup (set username via app metadata or trigger update)
 create or replace function public.handle_new_user()
@@ -51,12 +56,13 @@ begin
 end;
 $$;
 
-create or replace trigger on_auth_user_created
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
 -- 3. Core Application Tables
-create table public.courses (
+create table if not exists public.courses (
   id text primary key,
   user_id uuid not null references public.profiles (id) on delete cascade,
   code text not null,
@@ -74,7 +80,7 @@ create table public.courses (
   created_at timestamptz default now()
 );
 
-create table public.assignments (
+create table if not exists public.assignments (
   id text primary key,
   user_id uuid not null references public.profiles (id) on delete cascade,
   title text not null,
@@ -85,7 +91,7 @@ create table public.assignments (
   progress int default 0
 );
 
-create table public.notes (
+create table if not exists public.notes (
   id text primary key,
   user_id uuid not null references public.profiles (id) on delete cascade,
   title text not null,
@@ -96,7 +102,7 @@ create table public.notes (
   updated_at timestamptz default now()
 );
 
-create table public.exams (
+create table if not exists public.exams (
   id text primary key,
   user_id uuid not null references public.profiles (id) on delete cascade,
   course_id text references public.courses (id) on delete set null,
@@ -109,7 +115,7 @@ create table public.exams (
   created_at timestamptz default now()
 );
 
-create table public.study_sessions (
+create table if not exists public.study_sessions (
   id text primary key,
   user_id uuid not null references public.profiles (id) on delete cascade,
   course_id text references public.courses (id) on delete cascade,
@@ -118,20 +124,20 @@ create table public.study_sessions (
   completed_at timestamptz default now()
 );
 
-create table public.system_config (
+create table if not exists public.system_config (
   key text primary key,
   data jsonb not null default '{}',
   updated_at timestamptz default now()
 );
 
-create table public.exam_dates (
+create table if not exists public.exam_dates (
   user_id uuid not null references public.profiles (id) on delete cascade,
   course_id text not null,
   iso_date text not null,
   primary key (user_id, course_id)
 );
 
-create table public.routines (
+create table if not exists public.routines (
   id text primary key,
   user_id uuid not null references public.profiles (id) on delete cascade,
   day text not null,
@@ -144,7 +150,7 @@ create table public.routines (
   is_class boolean default false
 );
 
-create table public.exam_checklist (
+create table if not exists public.exam_checklist (
   id text primary key,
   user_id uuid not null references public.profiles (id) on delete cascade,
   course_id text not null,
@@ -152,14 +158,14 @@ create table public.exam_checklist (
   done boolean default false
 );
 
-create table public.semester_settings (
+create table if not exists public.semester_settings (
   user_id uuid primary key references public.profiles (id) on delete cascade,
   start_date text not null,
   end_date text not null,
   label text
 );
 
-create table public.holidays (
+create table if not exists public.holidays (
   id text primary key,
   user_id uuid not null references public.profiles (id) on delete cascade,
   label text not null,
@@ -168,7 +174,7 @@ create table public.holidays (
   type text not null default 'single'
 );
 
-create table public.attendance_logs (
+create table if not exists public.attendance_logs (
   id text primary key,
   user_id uuid not null references public.profiles (id) on delete cascade,
   course_id text not null,
@@ -179,7 +185,7 @@ create table public.attendance_logs (
   cancelled boolean default false
 );
 
-create table public.notification_prefs (
+create table if not exists public.notification_prefs (
   user_id uuid primary key references public.profiles (id) on delete cascade,
   email text not null default '',
   enabled boolean default false,
@@ -205,45 +211,67 @@ alter table public.notification_prefs enable row level security;
 
 -- 5. Row Level Security Policies
 -- Profiles policies
+drop policy if exists "profiles_select_own" on public.profiles;
 create policy "profiles_select_own" on public.profiles for select using (auth.uid() = id);
+drop policy if exists "profiles_insert_own" on public.profiles;
 create policy "profiles_insert_own" on public.profiles for insert with check (auth.uid() = id);
+drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles for update using (auth.uid() = id);
+drop policy if exists "profiles_admin_select_all" on public.profiles;
 create policy "profiles_admin_select_all" on public.profiles for select using (
   exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
 );
+drop policy if exists "profiles_admin_update" on public.profiles;
 create policy "profiles_admin_update" on public.profiles for update using (
   exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
 );
 
 -- Student-specific data tables policies
+drop policy if exists "courses_own" on public.courses;
 create policy "courses_own" on public.courses for all using (auth.uid() = user_id);
+drop policy if exists "assignments_own" on public.assignments;
 create policy "assignments_own" on public.assignments for all using (auth.uid() = user_id);
+drop policy if exists "notes_own" on public.notes;
 create policy "notes_own" on public.notes for all using (auth.uid() = user_id);
+drop policy if exists "exams_own" on public.exams;
 create policy "exams_own" on public.exams for all using (auth.uid() = user_id);
+drop policy if exists "study_sessions_own" on public.study_sessions;
 create policy "study_sessions_own" on public.study_sessions for all using (auth.uid() = user_id);
+drop policy if exists "exam_dates_own" on public.exam_dates;
 create policy "exam_dates_own" on public.exam_dates for all using (auth.uid() = user_id);
+drop policy if exists "routines_own" on public.routines;
 create policy "routines_own" on public.routines for all using (auth.uid() = user_id);
+drop policy if exists "exam_checklist_own" on public.exam_checklist;
 create policy "exam_checklist_own" on public.exam_checklist for all using (auth.uid() = user_id);
+drop policy if exists "semester_settings_own" on public.semester_settings;
 create policy "semester_settings_own" on public.semester_settings for all using (auth.uid() = user_id);
+drop policy if exists "holidays_own" on public.holidays;
 create policy "holidays_own" on public.holidays for all using (auth.uid() = user_id);
+drop policy if exists "attendance_logs_own" on public.attendance_logs;
 create policy "attendance_logs_own" on public.attendance_logs for all using (auth.uid() = user_id);
+drop policy if exists "notification_prefs_own" on public.notification_prefs;
 create policy "notification_prefs_own" on public.notification_prefs for all using (auth.uid() = user_id);
 
 -- System Config: admins only
+drop policy if exists "system_config_admin" on public.system_config;
 create policy "system_config_admin" on public.system_config for all using (
   exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
 );
 
 -- Admin read-all access for student auditing
+drop policy if exists "courses_admin_select" on public.courses;
 create policy "courses_admin_select" on public.courses for select using (
   exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
 );
+drop policy if exists "assignments_admin_select" on public.assignments;
 create policy "assignments_admin_select" on public.assignments for select using (
   exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
 );
+drop policy if exists "exams_admin_select" on public.exams;
 create policy "exams_admin_select" on public.exams for select using (
   exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
 );
+drop policy if exists "study_sessions_admin_select" on public.study_sessions;
 create policy "study_sessions_admin_select" on public.study_sessions for select using (
   exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
 );

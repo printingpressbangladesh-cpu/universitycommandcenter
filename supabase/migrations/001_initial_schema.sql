@@ -4,14 +4,20 @@
 -- ---------------------------------------------------------------------------
 -- Profiles (linked to Supabase Auth)
 -- ---------------------------------------------------------------------------
-create type public.user_role as enum (
-  'admin',
-  'student',
-  'student_support',
-  'technical',
-  'operations',
-  'academic'
-);
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'user_role' and typnamespace = 'public'::regnamespace) then
+    create type public.user_role as enum (
+      'admin',
+      'student',
+      'student_support',
+      'technical',
+      'operations',
+      'academic'
+    );
+  end if;
+end
+$$;
 
 create table public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
@@ -51,6 +57,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
