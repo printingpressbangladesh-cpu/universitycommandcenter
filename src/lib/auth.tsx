@@ -49,7 +49,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await refresh();
       } catch (e) {
         if (!cancelled) {
-          setConfigError(e instanceof Error ? e.message : "Auth failed to start");
+          console.error("Auth initialization failed:", e);
+          const errorMsg = e instanceof Error 
+            ? e.message 
+            : (typeof e === "object" && e && "message" in e)
+              ? String((e as { message: unknown }).message)
+              : String(e);
+          setConfigError(errorMsg || "Auth failed to start");
           setLoading(false);
         }
       }
