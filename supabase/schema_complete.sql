@@ -193,6 +193,20 @@ create table if not exists public.notification_prefs (
   last_synced_at timestamptz
 );
 
+-- Helper function to check if the current user is an admin without causing infinite recursion in RLS policies
+create or replace function public.is_admin()
+returns boolean
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  return exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'admin'
+  );
+end;
+$$;
+
 -- 4. Enable Row Level Security (RLS)
 alter table public.profiles enable row level security;
 alter table public.courses enable row level security;
@@ -219,11 +233,15 @@ drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles for update using (auth.uid() = id);
 drop policy if exists "profiles_admin_select_all" on public.profiles;
 create policy "profiles_admin_select_all" on public.profiles for select using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 drop policy if exists "profiles_admin_update" on public.profiles;
 create policy "profiles_admin_update" on public.profiles for update using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
+);
+drop policy if exists "profiles_admin_delete" on public.profiles;
+create policy "profiles_admin_delete" on public.profiles for delete using (
+  public.is_admin()
 );
 
 -- Student-specific data tables policies
@@ -255,25 +273,25 @@ create policy "notification_prefs_own" on public.notification_prefs for all usin
 -- System Config: admins only
 drop policy if exists "system_config_admin" on public.system_config;
 create policy "system_config_admin" on public.system_config for all using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 
 -- Admin read-all access for student auditing
 drop policy if exists "courses_admin_select" on public.courses;
 create policy "courses_admin_select" on public.courses for select using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 drop policy if exists "assignments_admin_select" on public.assignments;
 create policy "assignments_admin_select" on public.assignments for select using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 drop policy if exists "exams_admin_select" on public.exams;
 create policy "exams_admin_select" on public.exams for select using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 drop policy if exists "study_sessions_admin_select" on public.study_sessions;
 create policy "study_sessions_admin_select" on public.study_sessions for select using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 
 -- 6. Initial Data Seeding

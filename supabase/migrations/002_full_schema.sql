@@ -115,20 +115,25 @@ create policy "notification_prefs_own" on public.notification_prefs for all usin
 
 -- Admin read all student data
 create policy "courses_admin_select" on public.courses for select using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 create policy "assignments_admin_select" on public.assignments for select using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 create policy "exams_admin_select" on public.exams for select using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 create policy "study_sessions_admin_select" on public.study_sessions for select using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 
 create policy "profiles_admin_update" on public.profiles for update using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
+);
+
+drop policy if exists "profiles_admin_delete" on public.profiles;
+create policy "profiles_admin_delete" on public.profiles for delete using (
+  public.is_admin()
 );
 
 -- Seed default system email config (admin can change in app)

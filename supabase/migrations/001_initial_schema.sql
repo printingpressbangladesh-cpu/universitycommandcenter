@@ -132,6 +132,19 @@ create table public.system_config (
   data jsonb not null default '{}',
   updated_at timestamptz default now()
 );
+-- Helper function to check if the current user is an admin without causing infinite recursion in RLS policies
+create or replace function public.is_admin()
+returns boolean
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  return exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'admin'
+  );
+end;
+$$;
 
 -- ---------------------------------------------------------------------------
 -- Row Level Security
@@ -149,7 +162,7 @@ create policy "profiles_select_own" on public.profiles for select using (auth.ui
 create policy "profiles_update_own" on public.profiles for update using (auth.uid() = id);
 
 create policy "profiles_admin_select_all" on public.profiles for select using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
 
 -- Student tables: own rows only
@@ -161,5 +174,5 @@ create policy "study_sessions_own" on public.study_sessions for all using (auth.
 
 -- System config: admins only
 create policy "system_config_admin" on public.system_config for all using (
-  exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  public.is_admin()
 );
