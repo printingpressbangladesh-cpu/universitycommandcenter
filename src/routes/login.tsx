@@ -215,11 +215,6 @@ function LoginPage() {
               </form>
             </TabsContent>
           </Tabs>
-
-          <p className="mt-6 text-center text-[10px] text-muted-foreground">
-            Administrator? Sign in with <span className="font-medium">{adminEmail}</span> — change password in
-            Settings or Admin.
-          </p>
         </div>
       </div>
     </div>

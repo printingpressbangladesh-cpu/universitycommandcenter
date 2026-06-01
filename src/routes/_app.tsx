@@ -41,6 +41,12 @@ function AppLayout() {
 
   useEffect(() => { setOpen(false); }, [path]);
 
+  const handleSignOut = async () => {
+    setOpen(false);
+    await signOut();
+    navigate({ to: "/login" });
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -56,7 +62,7 @@ function AppLayout() {
     <div className="flex min-h-screen w-full">
       {/* Sidebar (desktop) */}
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-sidebar-border bg-sidebar/80 p-4 backdrop-blur-xl md:flex md:flex-col">
-        <SidebarInner path={path} fullName={fullName} email={user?.email ?? ""} isAdmin={isAdmin} onSignOut={() => signOut().then(() => navigate({ to: "/login" }))} />
+        <SidebarInner path={path} fullName={fullName} email={user?.email ?? ""} isAdmin={isAdmin} onSignOut={handleSignOut} />
       </aside>
 
       {/* Sidebar (mobile drawer) */}
@@ -67,7 +73,7 @@ function AppLayout() {
             className="absolute left-0 top-0 h-full w-72 border-r border-sidebar-border bg-sidebar p-4 backdrop-blur-xl animate-fade-in-up"
             onClick={(e) => e.stopPropagation()}
           >
-            <SidebarInner path={path} fullName={fullName} email={user?.email ?? ""} isAdmin={isAdmin} onSignOut={() => signOut().then(() => navigate({ to: "/login" }))} />
+            <SidebarInner path={path} fullName={fullName} email={user?.email ?? ""} isAdmin={isAdmin} onSignOut={handleSignOut} />
           </aside>
         </div>
       )}
@@ -162,8 +168,16 @@ function SidebarInner({
             <div className="truncate text-sm font-medium">{fullName}</div>
             <div className="truncate text-[11px] text-muted-foreground">{email}</div>
           </div>
-          <button onClick={onSignOut} aria-label="Sign out" className="rounded-lg p-1.5 text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
-            <LogOut className="h-4 w-4" />
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSignOut();
+            }}
+            aria-label="Sign out"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors focus:outline-none"
+          >
+            <LogOut className="h-4.5 w-4.5" />
           </button>
         </div>
       </div>
