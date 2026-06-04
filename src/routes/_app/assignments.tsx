@@ -4,7 +4,7 @@ import { useAssignments } from "@/lib/assignmentsStore";
 import { useCourses } from "@/lib/coursesStore";
 import type { Assignment } from "@/lib/types";
 import { CourseSelect } from "@/components/CourseSelect";
-import { Search, Plus, Award, Edit2 } from "lucide-react";
+import { Search, Plus, Award, Edit2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,7 +30,7 @@ const columns: { id: Assignment["status"]; title: string; tone: string }[] = [
 
 function AssignmentsPage() {
   const { courses } = useCourses();
-  const { assignments: items, setAssignments: setItems, addAssignment, updateAssignment } = useAssignments();
+  const { assignments: items, setAssignments: setItems, addAssignment, updateAssignment, removeAssignment } = useAssignments();
   const [q, setQ] = useState("");
   const [subject, setSubject] = useState<string>("all");
   const [dragId, setDragId] = useState<string | null>(null);
@@ -227,17 +227,33 @@ function AssignmentsPage() {
                     <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
                       {a.course}
                     </span>
-                    <span
-                      className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        a.priority === "high"
-                          ? "bg-destructive/20 text-destructive"
-                          : a.priority === "medium"
-                            ? "bg-[color:var(--warning)]/20 text-[color:var(--warning)]"
-                            : "bg-[color:var(--success)]/20 text-[color:var(--success)]"
-                      }`}
-                    >
-                      {a.priority}
-                    </span>
+                    <div className="ml-auto flex items-center gap-1">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                          a.priority === "high"
+                            ? "bg-destructive/20 text-destructive"
+                            : a.priority === "medium"
+                              ? "bg-[color:var(--warning)]/20 text-[color:var(--warning)]"
+                              : "bg-[color:var(--success)]/20 text-[color:var(--success)]"
+                        }`}
+                      >
+                        {a.priority}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm("Are you sure you want to delete this assignment?")) {
+                            removeAssignment(a.id);
+                            toast.success("Assignment deleted");
+                          }
+                        }}
+                        className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                        aria-label="Delete assignment"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <h4 className="mt-2 text-sm font-medium leading-snug">{a.title}</h4>
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">

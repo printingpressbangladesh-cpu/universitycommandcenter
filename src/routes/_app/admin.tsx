@@ -255,7 +255,7 @@ function AdminPage() {
                                       <strong>{c.code}</strong> — {c.name}
                                     </span>
                                     <span className="text-muted-foreground">
-                                      {c.attendance}% att. · {c.marks}% marks · {c.credits} cr
+                                      {c.attendance}% att. · {c.credits} cr
                                     </span>
                                   </li>
                                 ))}

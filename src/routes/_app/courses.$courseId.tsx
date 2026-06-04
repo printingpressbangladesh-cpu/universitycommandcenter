@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useCourse, useCourses } from "@/lib/coursesStore";
 import { useAssignments } from "@/lib/assignmentsStore";
@@ -19,8 +19,10 @@ export const Route = createFileRoute("/_app/courses/$courseId")({
 function CourseDetailPage() {
   const { courseId } = Route.useParams();
   const course = useCourse(courseId);
-  const { assignments } = useAssignments();
-  const { addWeakTopic, removeWeakTopic, updateCourse } = useCourses();
+  const { assignments, removeAssignment } = useAssignments();
+  const { addWeakTopic, removeWeakTopic, updateCourse, deleteCourse } = useCourses();
+  const navigate = useNavigate();
+
   const { exams, addExam, markDone, setMark, removeExam } = useExams();
   const [topic, setTopic] = useState("");
 
@@ -93,7 +95,7 @@ function CourseDetailPage() {
     );
   }
 
-  const tasks = assignments.filter((a) => a.course === course.code);
+  const tasks = assignments.filter((a) => a.course?.trim().toLowerCase() === course.code?.trim().toLowerCase());
   const pending = tasks.filter((a) => a.status !== "done");
 
   const addTopic = (e: React.FormEvent) => {
@@ -111,15 +113,30 @@ function CourseDetailPage() {
       <header className="glass-strong rounded-3xl p-6 md:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <span className="rounded-md px-2 py-0.5 text-xs font-semibold uppercase tracking-wider" style={{ background: `color-mix(in oklab, ${course.color} 20%, transparent)`, color: course.color }}>
-              {course.code}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="rounded-md px-2 py-0.5 text-xs font-semibold uppercase tracking-wider" style={{ background: `color-mix(in oklab, ${course.color} 20%, transparent)`, color: course.color }}>
+                {course.code}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={async () => {
+                  if (confirm("Are you sure you want to end this course? This will remove all logs, exams, and settings for this course.")) {
+                    await deleteCourse(course.id);
+                    toast.success("Course ended");
+                    navigate({ to: "/courses" });
+                  }
+                }}
+                className="h-6 rounded-md px-2 text-[10px] font-medium text-destructive hover:bg-destructive/10 hover:text-destructive border border-destructive/20 gap-1 transition-colors"
+              >
+                <Trash2 className="h-3 w-3" /> End Course
+              </Button>
+            </div>
             <h1 className="mt-2 text-2xl font-semibold">{course.name}</h1>
             <p className="text-sm text-muted-foreground">{course.faculty} · {course.credits} credits</p>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
             <Stat label="Attendance" value={`${course.attendance}%`} />
-            <Stat label="Marks" value={displayMarks > 0 ? `${displayMarks}%` : "—"} />
             <Stat label="Attended" value={`${course.attended}/${course.totalClasses}`} />
             <Stat label="Progress" value={`${course.progress}%`} />
           </div>
@@ -131,7 +148,7 @@ function CourseDetailPage() {
             <div className="h-full" style={{ width: `${course.progress}%`, background: `linear-gradient(90deg, ${course.color}, var(--accent))` }} />
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-3">
           <Label className="sr-only">Progress</Label>
           <input
             type="range"
@@ -139,11 +156,28 @@ function CourseDetailPage() {
             max={100}
             value={course.progress}
             onChange={(e) => updateCourse(course.id, { progress: Number(e.target.value) })}
-            className="w-full max-w-xs"
+            className="w-full max-w-xs accent-primary"
           />
-          <span className="text-xs text-muted-foreground">Drag to update progress</span>
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={course.progress}
+              onChange={(e) => {
+                let val = Number(e.target.value);
+                if (val < 0) val = 0;
+                if (val > 100) val = 100;
+                updateCourse(course.id, { progress: val });
+              }}
+              className="w-16 h-8 text-center text-xs"
+            />
+            <span className="text-xs text-muted-foreground">%</span>
+          </div>
+          <span className="text-xs text-muted-foreground">Drag or type to update progress</span>
         </div>
       </header>
+
 
       <section className="glass-strong rounded-3xl p-6 space-y-4">
         <div className="flex items-center justify-between gap-4">
@@ -440,6 +474,20 @@ function CourseDetailPage() {
                     </div>
                   )}
                   <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] uppercase text-muted-foreground">{a.status.replace("_", " ")}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      if (confirm("Delete this assignment?")) {
+                        removeAssignment(a.id);
+                        toast.success("Assignment deleted");
+                      }
+                    }}
+                    className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-lg"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </div>
               </li>
             ))

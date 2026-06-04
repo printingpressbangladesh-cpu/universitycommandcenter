@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useCourses } from "@/lib/coursesStore";
 import { useRoutine } from "@/lib/routineStore";
 import { useSemester } from "@/lib/semesterStore";
@@ -27,9 +27,44 @@ const MIN = 70;
 function AttendancePage() {
   const { courses } = useCourses();
   const { blocks } = useRoutine();
-  const { semester, holidays, recordClassAttendance, cancelClass, getLogForSession } = useSemester();
+  const { semester, holidays, recordClassAttendance, cancelClass, getLogForSession, attendanceLogs } = useSemester();
   const [selectedDate, setSelectedDate] = useState(todayKey());
   const [excuse, setExcuse] = useState("");
+
+  const [activeCourseId, setActiveCourseId] = useState<string | null>(null);
+
+  // Initialize activeCourseId to the first course if not already set
+  useEffect(() => {
+    if (courses.length > 0 && !activeCourseId) {
+      setActiveCourseId(courses[0].id);
+    }
+  }, [courses, activeCourseId]);
+
+  const activeCourse = courses.find((c) => c.id === activeCourseId);
+
+  const sortedLogs = useMemo(() => {
+    if (!activeCourseId) return [];
+    return attendanceLogs
+      .filter((l) => l.courseId === activeCourseId)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [attendanceLogs, activeCourseId]);
+
+  const classRows = useMemo(() => {
+    let classNum = 0;
+    return sortedLogs.map((log) => {
+      if (!log.cancelled) {
+        classNum++;
+      }
+      return {
+        ...log,
+        classNumber: log.cancelled ? "—" : `Class #${classNum}`,
+      };
+    });
+  }, [sortedLogs]);
+
+  const presentCount = useMemo(() => sortedLogs.filter((l) => !l.cancelled && l.present).length, [sortedLogs]);
+  const absentCount = useMemo(() => sortedLogs.filter((l) => !l.cancelled && !l.present).length, [sortedLogs]);
+  const totalClassesLogged = useMemo(() => sortedLogs.filter((l) => !l.cancelled).length, [sortedLogs]);
 
   const dateObj = parseDateKey(selectedDate);
   const isToday = selectedDate === todayKey();
@@ -215,19 +250,119 @@ function AttendancePage() {
         </div>
       )}
 
-      {courses.length > 0 && scheduled.length === 0 && isToday && (
-        <section className="glass-strong rounded-3xl p-6">
-          <h2 className="text-sm font-semibold text-muted-foreground">Course overview</h2>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {courses.map((c) => (
-              <div key={c.id} className="rounded-xl border border-border/60 bg-secondary/30 p-3 text-sm">
-                <div className="font-medium">{c.code}</div>
-                <div className="text-xs text-muted-foreground">
-                  {c.attendance}% · {c.attended}/{c.totalClasses} logged · {c.plannedClasses} planned
+      {courses.length > 0 && (
+        <section className="glass-strong rounded-3xl p-6 space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">Individual Subject Details</h2>
+            <p className="text-sm text-muted-foreground">View your detailed class history, attendance logs, and statistics by course.</p>
+          </div>
+
+          {/* Subject Tabs */}
+          <div className="flex flex-wrap gap-2 border-b border-border/40 pb-4">
+            {courses.map((c) => {
+              const isActive = activeCourseId === c.id;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setActiveCourseId(c.id)}
+                  style={{
+                    borderColor: isActive ? c.color : "transparent",
+                    background: isActive ? `color-mix(in oklab, ${c.color} 15%, transparent)` : undefined,
+                    color: isActive ? c.color : undefined
+                  }}
+                  className={`rounded-xl border px-4 py-2 text-xs font-semibold uppercase tracking-wider transition-all hover:bg-secondary/40 ${
+                    isActive ? "" : "border-border/60 text-muted-foreground"
+                  }`}
+                >
+                  {c.code}
+                </button>
+              );
+            })}
+          </div>
+
+          {activeCourse && (
+            <div className="space-y-6 animate-fade-in-up">
+              {/* Summary Stats */}
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div className="rounded-2xl border border-[color:var(--success)]/20 bg-[color:var(--success)]/10 px-4 py-4 text-center">
+                  <div className="text-[10px] uppercase tracking-wider text-[color:var(--success)] font-semibold">Days Present</div>
+                  <div className="mt-1 text-2xl font-bold text-[color:var(--success)]">{presentCount}</div>
+                </div>
+                <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-4 py-4 text-center">
+                  <div className="text-[10px] uppercase tracking-wider text-destructive font-semibold">Days Absent</div>
+                  <div className="mt-1 text-2xl font-bold text-destructive">{absentCount}</div>
+                </div>
+                <div className="rounded-2xl border border-border/60 bg-secondary/30 px-4 py-4 text-center">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total Classes Logged</div>
+                  <div className="mt-1 text-2xl font-bold">{totalClassesLogged}</div>
+                </div>
+                <div className="rounded-2xl border border-border/60 bg-secondary/30 px-4 py-4 text-center">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Attendance Percentage</div>
+                  <div className="mt-1 text-2xl font-bold" style={{ color: activeCourse.attendance < 70 ? "var(--warning)" : "var(--success)" }}>
+                    {activeCourse.attendance}%
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
+
+              {/* Log Details List/Table */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Attendance Logs</h3>
+                {sortedLogs.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-6 border border-dashed border-border/60 rounded-2xl bg-secondary/15">
+                    No classes logged for this course yet.
+                  </p>
+                ) : (
+                  <div className="overflow-hidden rounded-2xl border border-border/60 bg-secondary/15">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-sm">
+                        <thead>
+                          <tr className="border-b border-border/40 bg-secondary/35 text-muted-foreground text-[10px] font-bold uppercase tracking-wider">
+                            <th className="px-4 py-3">Class No.</th>
+                            <th className="px-4 py-3">Date</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3">Note / Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/40">
+                          {classRows.map((row) => (
+                            <tr key={row.id} className="hover:bg-secondary/10 transition-colors">
+                              <td className="px-4 py-3 font-semibold">{row.classNumber}</td>
+                              <td className="px-4 py-3">
+                                {new Date(row.date + "T00:00:00").toLocaleDateString(undefined, {
+                                  month: "short",
+                                  day: "numeric",
+                                  year: "numeric",
+                                })}
+                              </td>
+                              <td className="px-4 py-3">
+                                {row.cancelled ? (
+                                  <span className="rounded-full bg-muted px-2.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground border border-border">
+                                    Cancelled
+                                  </span>
+                                ) : row.present ? (
+                                  <span className="rounded-full bg-[color:var(--success)]/15 text-[color:var(--success)] px-2.5 py-0.5 text-[10px] font-bold uppercase border border-[color:var(--success)]/20">
+                                    Present
+                                  </span>
+                                ) : (
+                                  <span className="rounded-full bg-destructive/15 text-destructive px-2.5 py-0.5 text-[10px] font-bold uppercase border border-destructive/20">
+                                    Absent
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-muted-foreground">
+                                {row.excuse || "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </section>
       )}
     </div>

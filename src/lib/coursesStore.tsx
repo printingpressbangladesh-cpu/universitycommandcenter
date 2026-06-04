@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
-import { listCourses, listExamDates, setExamDate as saveExamDate, upsertCourse } from "@/lib/supabase/data";
+import { listCourses, listExamDates, setExamDate as saveExamDate, upsertCourse, deleteCourse as deleteCourseDb } from "@/lib/supabase/data";
 import { onDataChanged } from "@/lib/events";
 import type { Course } from "@/lib/types";
 
@@ -12,10 +12,12 @@ type CoursesContextValue = {
   ready: boolean;
   addCourse: (course: Omit<Course, "id" | "attendance" | "attended" | "marks" | "progress" | "weakTopics" | "totalClasses"> & { weakTopics?: string[]; plannedClasses: number }) => void;
   updateCourse: (id: string, patch: Partial<Course>) => void;
+  deleteCourse: (id: string) => Promise<void>;
   addWeakTopic: (id: string, topic: string) => void;
   removeWeakTopic: (id: string, topic: string) => void;
   setExamDate: (courseId: string, isoDate: string) => void;
 };
+
 
 const CoursesContext = createContext<CoursesContextValue | null>(null);
 
@@ -95,6 +97,14 @@ export function CoursesProvider({ children }: { children: ReactNode }) {
     [persistCourse],
   );
 
+  const deleteCourse = useCallback(
+    async (id: string) => {
+      setCourses((prev) => prev.filter((c) => c.id !== id));
+      await deleteCourseDb(id);
+    },
+    [],
+  );
+
   const addWeakTopic = useCallback(
     (id: string, topic: string) => {
       const t = topic.trim();
@@ -134,9 +144,10 @@ export function CoursesProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ courses, examDates, ready, addCourse, updateCourse, addWeakTopic, removeWeakTopic, setExamDate }),
-    [courses, examDates, ready, addCourse, updateCourse, addWeakTopic, removeWeakTopic, setExamDate],
+    () => ({ courses, examDates, ready, addCourse, updateCourse, deleteCourse, addWeakTopic, removeWeakTopic, setExamDate }),
+    [courses, examDates, ready, addCourse, updateCourse, deleteCourse, addWeakTopic, removeWeakTopic, setExamDate],
   );
+
 
   return <CoursesContext.Provider value={value}>{children}</CoursesContext.Provider>;
 }

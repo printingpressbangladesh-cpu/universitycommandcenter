@@ -63,6 +63,11 @@ export async function upsertCourse(userId: string, course: Course) {
   if (error) throw error;
 }
 
+export async function deleteCourse(courseId: string) {
+  const { error } = await getSupabase().from("courses").delete().eq("id", courseId);
+  if (error) throw error;
+}
+
 export async function getCourse(courseId: string): Promise<(Course & { userId: string }) | null> {
   const { data, error } = await getSupabase().from("courses").select("*").eq("id", courseId).maybeSingle();
   if (error) throw error;

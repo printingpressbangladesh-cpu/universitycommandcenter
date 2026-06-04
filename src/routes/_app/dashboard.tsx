@@ -245,7 +245,7 @@ function Dashboard() {
                 </div>
                 <div className="mt-2 flex justify-between text-xs text-muted-foreground">
                   <span>{c.totalClasses > 0 ? `${c.attendance}% attendance` : "No classes logged"}</span>
-                  <span>{c.marks > 0 ? `${c.marks}% marks` : "—"}</span>
+                  <span>Progress: {c.progress}%</span>
                 </div>
               </Link>
             ))}
