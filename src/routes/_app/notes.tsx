@@ -4,18 +4,28 @@ import { useCourses } from "@/lib/coursesStore";
 import { useNotes } from "@/lib/notesStore";
 import type { Note } from "@/lib/types";
 import { CourseSelect } from "@/components/CourseSelect";
-import { Pin, Plus, Search, Trash2 } from "lucide-react";
+import { Pin, Plus, Search, Trash2, PanelLeft, PanelLeftClose } from "lucide-react";
+import { DocsEditor } from "@/components/DocsEditor";
+
+function stripHtml(html: string) {
+  if (typeof document === "undefined") return html;
+  const tmp = document.createElement("DIV");
+  tmp.innerHTML = html;
+  return tmp.textContent || tmp.innerText || "";
+}
 
 export const Route = createFileRoute("/_app/notes")({
   component: NotesPage,
   head: () => ({ meta: [{ title: "Notes · University Command Center" }] }),
 });
 
+
 function NotesPage() {
   const { courses } = useCourses();
   const { notes, setNotes } = useNotes();
   const [selectedId, setSelectedId] = useState<string>("");
   const [q, setQ] = useState("");
+  const [showSidebar, setShowSidebar] = useState(true);
 
   useEffect(() => {
     if (!selectedId && notes[0]) setSelectedId(notes[0].id);
@@ -39,6 +49,7 @@ function NotesPage() {
     const n: Note = { id: crypto.randomUUID(), title: "Untitled", body: "", tags: [], pinned: false, updatedAt: new Date().toISOString() };
     setNotes((p) => [n, ...p]);
     setSelectedId(n.id);
+    setShowSidebar(false);
   };
 
   const remove = (id: string) => {
@@ -58,8 +69,12 @@ function NotesPage() {
         </button>
       </header>
 
-      <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
-        <aside className="glass-strong rounded-3xl p-3">
+      <div className={`grid gap-5 transition-all duration-300 ${
+        showSidebar ? "lg:grid-cols-[320px_1fr] grid-cols-1" : "grid-cols-1"
+      }`}>
+        <aside className={`glass-strong rounded-3xl p-3 transition-all ${
+          showSidebar ? "block" : "hidden"
+        }`}>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search notes" className="h-10 w-full rounded-xl border border-border/60 bg-secondary/40 pl-9 pr-3 text-sm outline-none focus:border-ring" />
@@ -67,13 +82,21 @@ function NotesPage() {
           <ul className="mt-3 max-h-[60vh] space-y-1 overflow-y-auto">
             {filtered.map((n) => (
               <li key={n.id}>
-                <button onClick={()=>setSelectedId(n.id)} className={`group flex w-full items-start gap-2 rounded-2xl p-3 text-left transition ${selected?.id === n.id ? "bg-secondary/70" : "hover:bg-secondary/40"}`}>
+                <button
+                  onClick={() => {
+                    setSelectedId(n.id);
+                    if (window.innerWidth < 1024) {
+                      setShowSidebar(false);
+                    }
+                  }}
+                  className={`group flex w-full items-start gap-2 rounded-2xl p-3 text-left transition ${selected?.id === n.id ? "bg-secondary/70" : "hover:bg-secondary/40"}`}
+                >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1 text-sm font-medium">
                       {n.pinned && <Pin className="h-3 w-3 text-[color:var(--cyan)]" />}
                       <span className="truncate">{n.title}</span>
                     </div>
-                    <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{n.body || "No content yet…"}</p>
+                    <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{stripHtml(n.body) || "No content yet…"}</p>
                     {n.course && <span className="mt-1 inline-block rounded-md bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">{n.course}</span>}
                   </div>
                 </button>
@@ -82,10 +105,20 @@ function NotesPage() {
           </ul>
         </aside>
 
-        <section className="glass-strong rounded-3xl p-6">
+        <section className={`glass-strong rounded-3xl p-6 transition-all ${
+          !showSidebar ? "block" : "hidden lg:block"
+        }`}>
           {selected ? (
             <>
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSidebar(!showSidebar)}
+                  className="rounded-xl p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition-all border border-border/40 flex items-center justify-center shrink-0"
+                  title={showSidebar ? "Collapse Sidebar" : "Expand Sidebar"}
+                >
+                  {showSidebar ? <PanelLeftClose className="h-4.5 w-4.5" /> : <PanelLeft className="h-4.5 w-4.5" />}
+                </button>
                 <input value={selected.title} onChange={(e)=>update({ title: e.target.value })} className="flex-1 border-0 bg-transparent text-2xl font-semibold outline-none placeholder:text-muted-foreground" placeholder="Note title" />
                 <button onClick={()=>update({ pinned: !selected.pinned })} className={`rounded-lg p-2 transition ${selected.pinned ? "bg-[color:var(--cyan)]/15 text-[color:var(--cyan)]" : "text-muted-foreground hover:bg-secondary"}`} aria-label="Pin">
                   <Pin className="h-4 w-4" />
@@ -112,15 +145,28 @@ function NotesPage() {
                 />
                 <span className="text-muted-foreground">Updated {new Date(selected.updatedAt).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}</span>
               </div>
-              <textarea
-                value={selected.body}
-                onChange={(e)=>update({ body: e.target.value })}
-                placeholder="Write in markdown… # heading, **bold**, - bullets"
-                className="mt-4 h-[55vh] w-full resize-none rounded-2xl border border-border/60 bg-secondary/20 p-4 font-mono text-sm leading-relaxed outline-none focus:border-ring"
-              />
+              <div className="mt-4 h-[55vh]">
+                <DocsEditor
+                  value={selected.body}
+                  onChange={(html) => update({ body: html })}
+                  noteId={selected.id}
+                  placeholder="Start writing notes… Use the toolbar for styles, lists, and tables."
+                />
+              </div>
             </>
           ) : (
-            <div className="grid h-[60vh] place-items-center text-muted-foreground">No notes yet — create your first one.</div>
+            <div className="grid h-[60vh] place-items-center text-muted-foreground">
+              <div className="text-center space-y-3">
+                <p>No notes yet — create your first one.</p>
+                <button
+                  type="button"
+                  onClick={() => setShowSidebar(true)}
+                  className="lg:hidden text-xs text-primary underline"
+                >
+                  Show Notes List
+                </button>
+              </div>
+            </div>
           )}
         </section>
       </div>
