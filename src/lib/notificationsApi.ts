@@ -47,7 +47,7 @@ async function post(body: Record<string, unknown>) {
   if (!API_URL) throw new Error("Add VITE_OTP_API_URL in .env (Google Apps Script web app URL)");
   const res = await fetch(API_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "text/plain" },
     body: JSON.stringify(body),
   });
   const data = (await res.json()) as { ok?: boolean; error?: string };
