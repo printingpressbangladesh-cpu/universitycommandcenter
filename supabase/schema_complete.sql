@@ -90,7 +90,9 @@ create table if not exists public.assignments (
   status text default 'todo',
   progress int default 0,
   mark numeric,
-  max_mark numeric
+  max_mark numeric,
+  room_number text,
+  submission_type text
 );
 
 create table if not exists public.notes (

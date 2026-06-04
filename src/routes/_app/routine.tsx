@@ -5,12 +5,18 @@ import { useSemester } from "@/lib/semesterStore";
 import { useCourses } from "@/lib/coursesStore";
 import { useAuth } from "@/lib/auth";
 import { ROUTINE_DAYS } from "@/lib/scheduleUtils";
-import { Plus, Trash2, CalendarRange } from "lucide-react";
+import { Plus, Trash2, CalendarRange, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CourseSelect } from "@/components/CourseSelect";
 import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export const Route = createFileRoute("/_app/routine")({
   component: RoutinePage,
@@ -94,8 +100,187 @@ function RoutinePage() {
     return c ? `${c.code} — ${c.name}` : b.title;
   };
 
+  const downloadCSV = () => {
+    if (blocks.length === 0) {
+      toast.error("No routine data to download");
+      return;
+    }
+    const headers = ["Day", "Start Time", "End Time", "Course Code", "Class Title", "Location"];
+    const rows = blocks.map((b) => [
+      b.day,
+      b.start,
+      b.end,
+      b.courseCode || "",
+      b.title,
+      b.location || "",
+    ]);
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers.join(","), ...rows.map((r) => r.map((val) => `"${val.replace(/"/g, '""')}"`).join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `routine_${semester?.label?.replace(/\s+/g, "_") || "schedule"}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Routine CSV downloaded successfully");
+  };
+
+  const downloadICS = () => {
+    if (blocks.length === 0) {
+      toast.error("No routine data to download");
+      return;
+    }
+    
+    let icsContent = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//University Command Center//Routine Maker//EN\r\n";
+    
+    const dayMap: Record<string, string> = {
+      Mon: "MO",
+      Tue: "TU",
+      Wed: "WE",
+      Thu: "TH",
+      Fri: "FR",
+      Sat: "SA",
+      Sun: "SU",
+    };
+    
+    const getRecurUntil = () => {
+      if (semester?.endDate) {
+        const dateStr = semester.endDate.replace(/-/g, "");
+        return `;UNTIL=${dateStr}T235959Z`;
+      }
+      const d = new Date();
+      d.setMonth(d.getMonth() + 3);
+      const dateStr = d.toISOString().split("T")[0].replace(/-/g, "");
+      return `;UNTIL=${dateStr}T235959Z`;
+    };
+    
+    blocks.forEach((b) => {
+      const dayAbbr = dayMap[b.day];
+      if (!dayAbbr) return;
+      
+      const startTime = b.start.replace(/:/g, "");
+      const endTime = b.end.replace(/:/g, "");
+      
+      const baseDate = semester?.startDate ? new Date(semester.startDate) : new Date();
+      const dayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(
+        ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].find((d) => d.startsWith(b.day)) || "Mon"
+      );
+      while (baseDate.getDay() !== dayIndex) {
+        baseDate.setDate(baseDate.getDate() + 1);
+      }
+      
+      const yyyymmdd = baseDate.toISOString().split("T")[0].replace(/-/g, "");
+      const uid = `${b.id}@universitycommandcenter`;
+      
+      icsContent += "BEGIN:VEVENT\r\n";
+      icsContent += `UID:${uid}\r\n`;
+      icsContent += `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").split(".")[0]}Z\r\n`;
+      icsContent += `DTSTART;TZID=Asia/Dhaka:${yyyymmdd}T${startTime}00\r\n`;
+      icsContent += `DTEND;TZID=Asia/Dhaka:${yyyymmdd}T${endTime}00\r\n`;
+      icsContent += `SUMMARY:${b.title} (${b.courseCode || ""})\r\n`;
+      if (b.location) icsContent += `LOCATION:${b.location}\r\n`;
+      icsContent += `RRULE:FREQ=WEEKLY;BYDAY=${dayAbbr}${getRecurUntil()}\r\n`;
+      icsContent += "END:VEVENT\r\n";
+    });
+    
+    icsContent += "END:VCALENDAR\r\n";
+    
+    const blob = new Blob([icsContent], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `routine_${semester?.label?.replace(/\s+/g, "_") || "schedule"}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("Routine Calendar (ICS) downloaded successfully");
+  };
+
   return (
     <div className="space-y-6 animate-fade-in-up">
+      <style>{`
+        @media print {
+          body, html, #root, header, nav, button, select, input, form, section, aside {
+            visibility: hidden !important;
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+          }
+          
+          .print-title, .routine-grid-container, .routine-grid-container * {
+            visibility: visible !important;
+          }
+          
+          .print-title {
+            display: block !important;
+            text-align: center !important;
+            color: black !important;
+            font-size: 20pt !important;
+            font-weight: bold !important;
+            margin-bottom: 24pt !important;
+          }
+          
+          .routine-grid-container {
+            position: absolute !important;
+            left: 0 !important;
+            top: 60px !important;
+            width: 100% !important;
+            display: grid !important;
+            grid-template-columns: repeat(4, 1fr) !important;
+            gap: 12pt !important;
+          }
+
+          .routine-grid-container section {
+            border: 1px solid #dddddd !important;
+            border-radius: 8pt !important;
+            padding: 8pt !important;
+            background: #fafafa !important;
+            box-shadow: none !important;
+          }
+
+          .routine-grid-container section h3 {
+            color: #333333 !important;
+            font-weight: bold !important;
+            border-bottom: 1px solid #cccccc !important;
+            padding-bottom: 4pt !important;
+            margin-bottom: 8pt !important;
+          }
+
+          .routine-grid-container li {
+            border: 1px solid #e2e8f0 !important;
+            background: white !important;
+            box-shadow: none !important;
+            border-radius: 6pt !important;
+            padding: 6pt !important;
+            color: black !important;
+          }
+
+          .routine-grid-container li * {
+            color: black !important;
+          }
+
+          .routine-grid-container button {
+            display: none !important;
+          }
+
+          html, body, main, [data-router-root] {
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            margin: 0 !important;
+            padding: 20px !important;
+            background: white !important;
+          }
+        }
+      `}</style>
+
+      <h1 className="hidden print-title font-bold text-center text-black">
+        Weekly Class Routine — {semester?.label || "Schedule"}
+      </h1>
+
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Routine Maker</h1>
@@ -103,9 +288,30 @@ function RoutinePage() {
             Classes sync to Calendar & Attendance. Default semester length is 3 months.
           </p>
         </div>
-        <Button type="button" variant="outline" onClick={() => void handleSync()} className="gap-2">
-          <CalendarRange className="h-4 w-4" /> Sync email reminders
-        </Button>
+        <div className="flex gap-2 flex-wrap items-center">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline" className="gap-2 cursor-pointer">
+                <Download className="h-4 w-4" /> Download Routine
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="glass-strong border-border/60 rounded-2xl w-48 z-50">
+              <DropdownMenuItem onClick={downloadCSV} className="cursor-pointer">
+                Download as Excel (CSV)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={downloadICS} className="cursor-pointer">
+                Download Calendar (ICS)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => window.print()} className="cursor-pointer">
+                Print / Save PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Button type="button" variant="outline" onClick={() => void handleSync()} className="gap-2 cursor-pointer">
+            <CalendarRange className="h-4 w-4" /> Sync email reminders
+          </Button>
+        </div>
       </header>
 
       <section className="glass-strong rounded-3xl p-6">
@@ -239,7 +445,7 @@ function RoutinePage() {
         )}
       </section>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 routine-grid-container">
         {days.map((d) => {
           const dayBlocks = blocks.filter((b) => b.day === d);
           return (

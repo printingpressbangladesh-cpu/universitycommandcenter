@@ -11,6 +11,9 @@ import {
   Columns,
   Grid,
   Printer,
+  FileDown,
+  Subscript,
+  Superscript,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +34,24 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
   const [tableRows, setTableRows] = useState(3);
   const [tableCols, setTableCols] = useState(3);
   const [pageSize, setPageSize] = useState<"A4" | "Letter" | "Full">("Full");
+  const [pageCount, setPageCount] = useState(1);
+
+  useEffect(() => {
+    const updatePageCount = () => {
+      if (editorRef.current && pageSize !== "Full") {
+        const height = editorRef.current.scrollHeight;
+        const pageHeight = pageSize === "A4" ? 1122 : 1056;
+        const count = Math.max(1, Math.ceil(height / pageHeight));
+        setPageCount(count);
+      } else {
+        setPageCount(1);
+      }
+    };
+
+    updatePageCount();
+    const timer = setTimeout(updatePageCount, 100);
+    return () => clearTimeout(timer);
+  }, [value, pageSize]);
 
   // Focus and populate HTML when switching notes
   useEffect(() => {
@@ -46,6 +67,12 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
       if (html !== lastValueRef.current) {
         lastValueRef.current = html;
         onChange(html);
+      }
+      if (pageSize !== "Full") {
+        const height = editorRef.current.scrollHeight;
+        const pageHeight = pageSize === "A4" ? 1122 : 1056;
+        const count = Math.max(1, Math.ceil(height / pageHeight));
+        setPageCount(count);
       }
     }
   };
@@ -193,6 +220,62 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
     window.print();
   };
 
+  const exportWord = () => {
+    if (!editorRef.current) return;
+    const htmlContent = editorRef.current.innerHTML;
+
+    const converted = `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' 
+            xmlns:w='urn:schemas-microsoft-com:office:word' 
+            xmlns='http://www.w3.org/TR/REC-html40'>
+      <head>
+        <title>Exported Note</title>
+        <!--[if gte mso 9]>
+        <xml>
+          <w:WordDocument>
+            <w:View>Print</w:View>
+            <w:Zoom>100</w:Zoom>
+            <w:DoNotOptimizeForBrowser/>
+          </w:WordDocument>
+        </xml>
+        <![endif]-->
+        <style>
+          body {
+            font-family: 'Arial', sans-serif;
+            font-size: 11pt;
+            line-height: 1.5;
+          }
+          h1 { font-size: 18pt; font-weight: bold; margin-top: 12pt; margin-bottom: 6pt; }
+          h2 { font-size: 14pt; font-weight: bold; margin-top: 12pt; margin-bottom: 4pt; }
+          h3 { font-size: 12pt; font-weight: bold; margin-top: 10pt; margin-bottom: 4pt; }
+          p { margin: 0 0 6pt 0; }
+          table { border-collapse: collapse; width: 100%; margin: 12pt 0; }
+          th, td { border: 1px solid #cccccc; padding: 6pt; text-align: left; }
+          ul { list-style-type: disc; margin: 0 0 6pt 18pt; }
+          ol { list-style-type: decimal; margin: 0 0 6pt 18pt; }
+        </style>
+      </head>
+      <body>
+        ${htmlContent}
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob(['\ufeff' + converted], {
+      type: 'application/msword'
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `note-${noteId || 'doc'}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success("Word file exported successfully");
+  };
+
   return (
     <div className="flex flex-col h-full space-y-4">
       <style>{`
@@ -232,6 +315,14 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
         .rich-editor-content p {
           margin: 8px 0;
         }
+        .rich-editor-content sub {
+          vertical-align: sub;
+          font-size: 0.75em;
+        }
+        .rich-editor-content sup {
+          vertical-align: super;
+          font-size: 0.75em;
+        }
         .rich-editor-content h1 {
           font-size: 1.75em;
           font-weight: 700;
@@ -269,12 +360,21 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
 
         /* Print Override styles for exporting A4/Letter perfectly */
         @media print {
-          body, html, #root, main, header, aside, section, nav, button, select, input, .rich-text-toolbar {
+          html, body, #root, main, section, article, [data-router-root], .docs-page-container {
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            background: white !important;
+          }
+
+          body * {
             visibility: hidden !important;
-            background: none !important;
           }
           
-          .print-area-wrapper, .print-area-wrapper *, .print-area-page, .print-area-page * {
+          .print-area-wrapper, .print-area-wrapper * {
             visibility: visible !important;
           }
           
@@ -283,25 +383,25 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
-            height: auto !important;
-            padding: 0 !important;
             margin: 0 !important;
+            padding: 0 !important;
             background: white !important;
             overflow: visible !important;
           }
 
           .print-area-page {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            max-w: 100% !important;
-            min-h: 100% !important;
             border: none !important;
             box-shadow: none !important;
             padding: 20mm !important;
             background: white !important;
             color: black !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+          }
+
+          .bg-page-stack {
+            display: none !important;
           }
         }
       `}</style>
@@ -339,6 +439,28 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
             title="Underline"
           >
             <Underline className="h-4 w-4" />
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => executeCommand("subscript")}
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            title="Subscript"
+          >
+            <Subscript className="h-4 w-4" />
+          </Button>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => executeCommand("superscript")}
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            title="Superscript"
+          >
+            <Superscript className="h-4 w-4" />
           </Button>
 
           <select
@@ -479,8 +601,19 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
             type="button"
             variant="outline"
             size="sm"
+            onClick={exportWord}
+            className="h-8 text-xs gap-1.5 border-primary/40 text-primary hover:bg-primary/10 rounded-xl cursor-pointer"
+            title="Export as Word Document"
+          >
+            <FileDown className="h-3.5 w-3.5" /> Export Word
+          </Button>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
             onClick={exportPDF}
-            className="h-8 text-xs gap-1.5 border-primary/40 text-primary hover:bg-primary/10 rounded-xl"
+            className="h-8 text-xs gap-1.5 border-primary/40 text-primary hover:bg-primary/10 rounded-xl cursor-pointer"
             title="Export as PDF / Print"
           >
             <Printer className="h-3.5 w-3.5" /> Export PDF
@@ -489,21 +622,49 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
       </div>
 
       {/* Editor Content Area wrapper */}
-      <div className="docs-page-container print-area-wrapper">
-        <div
-          ref={editorRef}
-          contentEditable
-          onInput={handleInput}
-          onBlur={handleInput}
-          className={`rich-editor-content focus:outline-none transition-all print-area-page ${
-            pageSize === "A4"
-              ? "bg-card text-foreground shadow-2xl p-[15mm] md:p-[20mm] w-[210mm] min-h-[297mm] border border-border/60 rounded-sm"
-              : pageSize === "Letter"
-              ? "bg-card text-foreground shadow-2xl p-[15mm] md:p-[20mm] w-[8.5in] min-h-[11in] border border-border/60 rounded-sm"
-              : "w-full min-h-[50vh] p-2"
-          }`}
-          placeholder={placeholder}
-        />
+      <div className="docs-page-container print-area-wrapper flex flex-col items-center">
+        {pageSize !== "Full" ? (
+          <div className="relative flex justify-center">
+            {/* Background Page Stack */}
+            <div className="absolute inset-0 pointer-events-none flex flex-col bg-page-stack">
+              {Array.from({ length: pageCount }).map((_, i) => (
+                <div
+                  key={i}
+                  className="bg-card border-x border-t last:border-b border-border/60 shadow-2xl rounded-sm shrink-0"
+                  style={{
+                    width: pageSize === "A4" ? "210mm" : "8.5in",
+                    height: pageSize === "A4" ? "297mm" : "11in",
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* Editable Content Layer */}
+            <div
+              ref={editorRef}
+              contentEditable
+              onInput={handleInput}
+              onBlur={handleInput}
+              className="rich-editor-content focus:outline-none transition-all print-area-page bg-transparent text-foreground relative z-10"
+              style={{
+                width: pageSize === "A4" ? "210mm" : "8.5in",
+                minHeight: pageSize === "A4" ? `calc(${pageCount} * 297mm)` : `calc(${pageCount} * 11in)`,
+                padding: "20mm",
+                boxSizing: "border-box",
+              }}
+              placeholder={placeholder}
+            />
+          </div>
+        ) : (
+          <div
+            ref={editorRef}
+            contentEditable
+            onInput={handleInput}
+            onBlur={handleInput}
+            className="rich-editor-content focus:outline-none transition-all print-area-page w-full min-h-[50vh] p-4 bg-card text-foreground border border-border/60 rounded-2xl shadow-sm"
+            placeholder={placeholder}
+          />
+        )}
       </div>
     </div>
   );

@@ -322,6 +322,9 @@ export function SemesterProvider({ children }: { children: ReactNode }) {
         course: a.course,
         due: a.due,
         status: a.status,
+        priority: a.priority,
+        roomNumber: a.roomNumber ?? null,
+        submissionType: a.submissionType ?? null,
       })),
       examDates: examDatesArr,
       exams: userExams.map((ex) => {
@@ -335,6 +338,8 @@ export function SemesterProvider({ children }: { children: ReactNode }) {
           status: ex.status,
           mark: ex.mark ?? null,
           maxMark: ex.maxMark,
+          location: ex.location ?? null,
+          createdAt: ex.createdAt,
         };
       }),
       lastAttendanceDate,

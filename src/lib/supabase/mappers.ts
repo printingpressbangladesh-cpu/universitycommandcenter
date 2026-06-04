@@ -82,6 +82,8 @@ export function rowToAssignment(r: Record<string, unknown>): Assignment {
     progress: Number(r.progress ?? 0),
     mark: r.mark != null ? Number(r.mark) : null,
     maxMark: r.max_mark != null ? Number(r.max_mark) : null,
+    roomNumber: (r.room_number as string) || null,
+    submissionType: (r.submission_type as Assignment["submissionType"]) || null,
   };
 }
 
@@ -97,6 +99,8 @@ export function assignmentToRow(userId: string, a: Assignment) {
     progress: a.progress,
     mark: a.mark ?? null,
     max_mark: a.maxMark ?? null,
+    room_number: a.roomNumber ?? null,
+    submission_type: a.submissionType ?? null,
   };
 }
 

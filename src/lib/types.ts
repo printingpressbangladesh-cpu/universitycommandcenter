@@ -24,6 +24,8 @@ export type Assignment = {
   progress: number;
   mark?: number | null;
   maxMark?: number | null;
+  roomNumber?: string | null;
+  submissionType?: "online" | "hard_copy" | null;
 };
 
 export type Note = {

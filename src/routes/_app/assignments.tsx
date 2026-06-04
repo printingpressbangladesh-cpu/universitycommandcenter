@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useAssignments } from "@/lib/assignmentsStore";
 import { useCourses } from "@/lib/coursesStore";
+import { useSemester } from "@/lib/semesterStore";
 import type { Assignment } from "@/lib/types";
 import { CourseSelect } from "@/components/CourseSelect";
 import { Search, Plus, Award, Edit2, Trash2 } from "lucide-react";
@@ -31,6 +32,7 @@ const columns: { id: Assignment["status"]; title: string; tone: string }[] = [
 function AssignmentsPage() {
   const { courses } = useCourses();
   const { assignments: items, setAssignments: setItems, addAssignment, updateAssignment, removeAssignment } = useAssignments();
+  const { syncToGoogle } = useSemester();
   const [q, setQ] = useState("");
   const [subject, setSubject] = useState<string>("all");
   const [dragId, setDragId] = useState<string | null>(null);
@@ -39,6 +41,16 @@ function AssignmentsPage() {
   const [course, setCourse] = useState("none");
   const [due, setDue] = useState("");
   const [priority, setPriority] = useState<Assignment["priority"]>("medium");
+  const [roomNumber, setRoomNumber] = useState("");
+  const [submissionType, setSubmissionType] = useState<"online" | "hard_copy">("online");
+
+  const syncAssignmentsEmail = async () => {
+    try {
+      await syncToGoogle();
+    } catch (err) {
+      console.error("Auto-sync assignments to Google failed:", err);
+    }
+  };
 
   // Mark editing state
   const [markingId, setMarkingId] = useState<string | null>(null);
@@ -59,6 +71,7 @@ function AssignmentsPage() {
       prev.map((x) => (x.id === dragId ? { ...x, status: col, progress: col === "done" ? 100 : x.progress } : x)),
     );
     setDragId(null);
+    void syncAssignmentsEmail();
   };
 
   const handleCreate = (e: React.FormEvent) => {
@@ -84,13 +97,18 @@ function AssignmentsPage() {
       progress: 0,
       mark: null,
       maxMark: null,
+      roomNumber: roomNumber.trim() || null,
+      submissionType,
     });
     setTitle("");
     setCourse("none");
     setDue("");
     setPriority("medium");
+    setRoomNumber("");
+    setSubmissionType("online");
     setOpen(false);
     toast.success("Assignment created");
+    void syncAssignmentsEmail();
   };
 
   const startMarking = (a: Assignment) => {
@@ -113,6 +131,7 @@ function AssignmentsPage() {
     updateAssignment(id, { mark, maxMark });
     setMarkingId(null);
     toast.success("Mark saved");
+    void syncAssignmentsEmail();
   };
 
   return (
@@ -188,6 +207,23 @@ function AssignmentsPage() {
                       />
                     </div>
                   </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>Room number</Label>
+                      <Input value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} placeholder="Room 402" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Submission type</Label>
+                      <CourseSelect
+                        value={submissionType}
+                        onValueChange={(v) => setSubmissionType(v as "online" | "hard_copy")}
+                        options={[
+                          { value: "online", label: "Online" },
+                          { value: "hard_copy", label: "Hard copy" },
+                        ]}
+                      />
+                    </div>
+                  </div>
                   <Button type="submit" className="w-full bg-gradient-primary text-primary-foreground">
                     Create assignment
                   </Button>
@@ -246,6 +282,7 @@ function AssignmentsPage() {
                           if (confirm("Are you sure you want to delete this assignment?")) {
                             removeAssignment(a.id);
                             toast.success("Assignment deleted");
+                            void syncAssignmentsEmail();
                           }
                         }}
                         className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
@@ -256,6 +293,15 @@ function AssignmentsPage() {
                     </div>
                   </div>
                   <h4 className="mt-2 text-sm font-medium leading-snug">{a.title}</h4>
+                  {(a.roomNumber || a.submissionType) && (
+                    <div className="mt-1 flex flex-wrap gap-x-2 text-[10px] text-muted-foreground">
+                      {a.roomNumber && <span>Room: {a.roomNumber}</span>}
+                      {a.roomNumber && a.submissionType && <span>·</span>}
+                      {a.submissionType && (
+                        <span>{a.submissionType === "online" ? "Online" : "Hard copy"}</span>
+                      )}
+                    </div>
+                  )}
                   <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                     <div className="h-full bg-gradient-primary" style={{ width: `${a.progress}%` }} />
                   </div>

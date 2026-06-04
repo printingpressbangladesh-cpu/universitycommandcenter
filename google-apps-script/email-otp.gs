@@ -2,8 +2,6 @@
  * University Command Center — Google Apps Script backend
  *
  * Actions (POST JSON):
- *   send   — signup OTP
- *   verify — confirm OTP
  *   sync   — store routine, deadlines, prefs for scheduled emails
  *
  * TRIGGERS (Edit → Triggers → Add trigger):
@@ -16,10 +14,19 @@
  *       VITE_ADMIN_FORM_URL=<your Google Form for admin / mental health contact>
  */
 
-var OTP_TTL_MS = 10 * 60 * 1000;
 var JS_TO_WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 var SYNC_PREFIX = "sync_";
 var ABSENCE_DAYS = 7;
+
+var FUNNY_MESSAGES = [
+  "Tomorrow is a ghost town. No classes! Time to catch up on sleep or pretend you're studying.",
+  "Hooray! Tomorrow's routine is empty. Go ahead and start that 12-hour gaming session, your bed is calling.",
+  "No classes tomorrow! Your teachers are probably grading your papers, so lay low and enjoy the peace.",
+  "Tomorrow is free real estate! Zero lectures scheduled. Don't waste it on reading this email.",
+  "No classes tomorrow. Please try to remember what daylight looks like.",
+  "Your schedule tomorrow is as empty as my promise to study on weekends. Enjoy the holiday!",
+  "Zero classes tomorrow! Time to finally look at that topic you've been avoiding... or just watch memes."
+];
 
 function doPost(e) {
   try {
@@ -32,12 +39,6 @@ function doPost(e) {
       return syncUser(email, body.data || {});
     }
 
-    if (!email || email.indexOf("@") < 1) {
-      return json({ ok: false, error: "Invalid email" });
-    }
-    if (action === "send") return sendOtp(email);
-    if (action === "verify") return verifyOtp(email, (body.otp || "").toString().trim());
-
     return json({ ok: false, error: "Unknown action" });
   } catch (err) {
     return json({ ok: false, error: String(err) });
@@ -47,42 +48,8 @@ function doPost(e) {
 function doGet() {
   return json({
     ok: true,
-    message: "University Command Center API. POST: send | verify | sync",
+    message: "University Command Center API. POST: sync",
   });
-}
-
-// ——— OTP ———
-
-function sendOtp(email) {
-  var otp = String(Math.floor(100000 + Math.random() * 900000));
-  PropertiesService.getScriptProperties().setProperty("otp_" + email, otp + "|" + Date.now());
-
-  MailApp.sendEmail({
-    to: email,
-    subject: "Your University Command Center verification code",
-    htmlBody:
-      "<p>Your verification code is:</p>" +
-      "<p style='font-size:28px;font-weight:bold;letter-spacing:4px'>" +
-      otp +
-      "</p>" +
-      "<p>Expires in 10 minutes.</p>",
-  });
-  return json({ ok: true });
-}
-
-function verifyOtp(email, otp) {
-  var raw = PropertiesService.getScriptProperties().getProperty("otp_" + email);
-  if (!raw) return json({ ok: false, error: "No code sent for this email" });
-
-  var parts = raw.split("|");
-  if (Date.now() - parseInt(parts[1], 10) > OTP_TTL_MS) {
-    PropertiesService.getScriptProperties().deleteProperty("otp_" + email);
-    return json({ ok: false, error: "Code expired — request a new one" });
-  }
-  if (parts[0] !== otp) return json({ ok: false, error: "Invalid code" });
-
-  PropertiesService.getScriptProperties().deleteProperty("otp_" + email);
-  return json({ ok: true });
 }
 
 // ——— Sync ———
@@ -104,6 +71,7 @@ function syncUser(email, data) {
     lastDigestDate: null,
     lastAbsenceEmailAt: null,
     lastMarkReminderDate: null,
+    lastHealthEmailMonth: null,
   };
 
   var existing = getSync(email);
@@ -111,6 +79,7 @@ function syncUser(email, data) {
     store.lastDigestDate = existing.lastDigestDate;
     store.lastAbsenceEmailAt = existing.lastAbsenceEmailAt;
     store.lastMarkReminderDate = existing.lastMarkReminderDate;
+    store.lastHealthEmailMonth = existing.lastHealthEmailMonth;
   }
 
   PropertiesService.getScriptProperties().setProperty(SYNC_PREFIX + email, JSON.stringify(store));
@@ -142,7 +111,7 @@ function saveSync(email, data) {
   PropertiesService.getScriptProperties().setProperty(SYNC_PREFIX + email, JSON.stringify(data));
 }
 
-// ——— Schedule helpers (mirror app scheduleUtils) ———
+// ——— Schedule helpers ———
 
 function dateKey(d) {
   var y = d.getFullYear();
@@ -196,7 +165,12 @@ function tomorrowKey() {
   return dateKey(t);
 }
 
-// ——— Daily digest: one email, all classes tomorrow + deadlines ———
+function getRandomFunnyMessage() {
+  var index = Math.floor(Math.random() * FUNNY_MESSAGES.length);
+  return FUNNY_MESSAGES[index];
+}
+
+// ——— Daily digest ———
 
 function sendDailyDigests() {
   var emails = listSyncedEmails();
@@ -207,29 +181,54 @@ function sendDailyDigests() {
     var data = getSync(email);
     if (!data || !data.notificationsEnabled) continue;
 
-    var today = dateKey(new Date());
+    var todayObj = new Date();
+    var today = dateKey(todayObj);
+
+    // 5. Monthly Health Email Day 5 Check
+    var todayDay = todayObj.getDate();
+    if (todayDay === 5) {
+      var healthMonthKey = todayObj.getFullYear() + "-" + (todayObj.getMonth() + 1);
+      if (data.lastHealthEmailMonth !== healthMonthKey) {
+        sendHealthEmail(email, data);
+        data.lastHealthEmailMonth = healthMonthKey;
+        saveSync(email, data);
+      }
+    }
+
     if (data.lastDigestDate === today) continue;
 
-    if (!isWithinSemester(tomorrow, data.semester) || isHoliday(tomorrow, data.holidays)) {
-      data.lastDigestDate = today;
-      saveSync(email, data);
-      continue;
+    var isHol = isHoliday(tomorrow, data.holidays);
+    var isSem = isWithinSemester(tomorrow, data.semester);
+
+    var classes = [];
+    if (!isHol && isSem) {
+      classes = classesForDate(data, tomorrow);
     }
 
-    var classes = classesForDate(data, tomorrow);
-    var deadlines = upcomingDeadlines(data, 3);
-    var tomorrowExams = examsOnDate(data, tomorrow);
+    // 1 & 2. Get assignments & exams for yesterday (1 day remaining) and 2 days earlier (2 days remaining)
+    var dueTomorrow = getAssignmentsDueIn(data, 1);
+    var dueIn2Days = getAssignmentsDueIn(data, 2);
 
-    if (classes.length === 0 && deadlines.length === 0 && tomorrowExams.length === 0) {
-      data.lastDigestDate = today;
-      saveSync(email, data);
-      continue;
+    var examsTomorrow = getExamsIn(data, 1);
+    var examsIn2Days = getExamsIn(data, 2);
+
+    var holidayMsg = "";
+    if (isHol) {
+      holidayMsg = "Tomorrow is a holiday! No classes whatsoever. Go celebrate!";
+    } else if (!isSem) {
+      holidayMsg = "Tomorrow is outside your active semester period. Relax, the command center is in sleep mode!";
     }
 
-    var html = buildDigestHtml(tomorrow, classes, deadlines, tomorrowExams);
+    var html = "";
+    if (holidayMsg) {
+      html = buildHolidayDigestHtml(tomorrow, holidayMsg, dueTomorrow, dueIn2Days, examsTomorrow, examsIn2Days);
+    } else {
+      html = buildDigestHtml(tomorrow, classes, dueTomorrow, dueIn2Days, examsTomorrow, examsIn2Days);
+    }
+
     MailApp.sendEmail({
       to: email,
-      subject: "Tomorrow's schedule · University Command Center",
+      subject: "Your Daily Schedule Digest · University Command Center",
       htmlBody: html,
     });
 
@@ -238,106 +237,208 @@ function sendDailyDigests() {
   }
 }
 
-function upcomingDeadlines(data, withinDays) {
+function getAssignmentsDueIn(data, daysRemaining) {
   var now = new Date();
   now.setHours(0, 0, 0, 0);
   var out = [];
-  for (var i = 0; i < data.assignments.length; i++) {
-    var a = data.assignments[i];
-    if (a.status === "done") continue;
+  var list = data.assignments || [];
+  for (var i = 0; i < list.length; i++) {
+    var a = list[i];
     var due = new Date(a.due);
     due.setHours(0, 0, 0, 0);
     var diff = Math.round((due - now) / (24 * 60 * 60 * 1000));
-    if (diff >= 0 && diff <= withinDays) {
-      out.push({ title: a.title, course: a.course, due: a.due, days: diff });
+    if (diff === daysRemaining) {
+      out.push(a);
     }
   }
-  out.sort(function (a, b) {
-    return a.due.localeCompare(b.due);
-  });
   return out;
 }
 
-function examsOnDate(data, dateKeyStr) {
-  var list = data.exams || [];
+function getExamsIn(data, daysRemaining) {
+  var now = new Date();
+  now.setHours(0, 0, 0, 0);
   var out = [];
+  var list = data.exams || [];
   for (var i = 0; i < list.length; i++) {
     var ex = list[i];
-    if (ex.date === dateKeyStr && ex.status === "upcoming") {
+    if (ex.status !== "upcoming") continue;
+
+    // Check creation date: (if exam is created on previous date relative to exam date, i.e. created on/after exam date, no email)
+    if (ex.createdAt) {
+      var examDateStr = ex.date;
+      var createdDateStr = ex.createdAt.substring(0, 10);
+      if (createdDateStr >= examDateStr) {
+        continue;
+      }
+    }
+
+    var examDate = parseDateKey(ex.date);
+    examDate.setHours(0, 0, 0, 0);
+    var diff = Math.round((examDate - now) / (24 * 60 * 60 * 1000));
+    if (diff === daysRemaining) {
       out.push(ex);
     }
   }
   return out;
 }
 
-function examsNeedingMark(data) {
-  var today = dateKey(new Date());
-  var list = data.exams || [];
-  var out = [];
-  for (var i = 0; i < list.length; i++) {
-    var ex = list[i];
-    if (ex.status !== "done") continue;
-    if (ex.mark !== null && ex.mark !== undefined && ex.mark !== "") continue;
-    if (ex.date > today) continue;
-    out.push(ex);
-  }
-  return out;
-}
+function buildDigestHtml(tomorrow, classes, dueTomorrow, dueIn2Days, examsTomorrow, examsIn2Days) {
+  var parts = ["<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;border:1px solid #e2e8f0;border-radius:16px;background:#ffffff;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);'>"];
+  parts.push("<h2 style='color:#7c3aed;margin-top:0;'>University Command Center</h2>");
+  parts.push("<p style='color:#64748b;font-size:14px;margin-bottom:20px;'>Daily schedule and reminder digest for tomorrow, <strong>" + tomorrow + "</strong>.</p>");
+  parts.push("<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;'/>");
 
-function buildDigestHtml(tomorrow, classes, deadlines, tomorrowExams) {
-  tomorrowExams = tomorrowExams || [];
-  var parts = ["<h2>University Command Center</h2>"];
-  parts.push("<p>Here is your reminder for <strong>" + tomorrow + "</strong> (sent the day before).</p>");
-
-  if (tomorrowExams.length) {
-    parts.push("<h3>Exams tomorrow (" + tomorrowExams.length + ")</h3><ul>");
-    for (var e = 0; e < tomorrowExams.length; e++) {
-      var ex = tomorrowExams[e];
-      parts.push(
-        "<li><strong>" +
-          (ex.courseCode || "Exam") +
-          "</strong> — " +
-          ex.title +
-          (ex.maxMark ? " (out of " + ex.maxMark + ")" : "") +
-          "</li>",
-      );
-    }
-    parts.push("</ul>");
-  }
-
-  if (classes.length) {
-    parts.push("<h3>All classes tomorrow (" + classes.length + ")</h3><ul>");
+  // 3. Classes Routine or Funny message
+  parts.push("<h3 style='color:#0f172a;margin-bottom:12px;font-size:16px;'>Classes Tomorrow</h3>");
+  if (classes.length > 0) {
+    parts.push("<ul style='list-style:none;padding:0;margin:0;'>");
     for (var i = 0; i < classes.length; i++) {
       var c = classes[i];
-      parts.push(
-        "<li><strong>" +
-          (c.courseCode || c.title) +
-          "</strong> — " +
-          c.title +
-          " · " +
-          c.start +
-          "–" +
-          c.end +
-          (c.location ? " · " + c.location : "") +
-          "</li>",
-      );
+      var loc = c.location ? " (Room: " + c.location + ")" : " (No room set)";
+      parts.push("<li style='padding:12px;background:#f8fafc;border-radius:10px;margin-bottom:8px;border-left:4px solid #7c3aed;'>");
+      parts.push("<strong style='color:#1e1b4b;'>" + c.start + " - " + c.end + "</strong>: " + (c.courseCode || c.title) + " - " + c.title + "<span style='color:#64748b;font-size:12px;margin-left:4px;'>" + loc + "</span>");
+      parts.push("</li>");
+    }
+    parts.push("</ul>");
+  } else {
+    parts.push("<p style='font-style:italic;color:#166534;background:#f0fdf4;padding:16px;border-radius:10px;border-left:4px solid #22c55e;margin:0;font-size:14px;line-height:1.5;'>🎉 " + getRandomFunnyMessage() + "</p>");
+  }
+
+  // 2. Exams Section (2 days earlier and yesterday of exam date)
+  if (examsTomorrow.length > 0 || examsIn2Days.length > 0) {
+    parts.push("<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;'/>");
+    parts.push("<h3 style='color:#0f172a;margin-bottom:12px;font-size:16px;'>Upcoming Exams</h3>");
+    parts.push("<ul style='list-style:none;padding:0;margin:0;'>");
+    for (var j = 0; j < examsTomorrow.length; j++) {
+      var exT = examsTomorrow[j];
+      var loc = exT.location ? " (Room: " + exT.location + ")" : " (No room set)";
+      parts.push("<li style='padding:12px;background:#fef2f2;border-radius:10px;margin-bottom:8px;border-left:4px solid #dc2626;'>");
+      parts.push("<strong style='color:#dc2626;'>TOMORROW (" + exT.date + "):</strong> " + (exT.courseCode || "") + " — " + exT.title + "<span style='color:#64748b;font-size:12px;margin-left:4px;'>" + loc + "</span>");
+      parts.push("</li>");
+    }
+    for (var k = 0; k < examsIn2Days.length; k++) {
+      var ex2 = examsIn2Days[k];
+      var loc = ex2.location ? " (Room: " + ex2.location + ")" : " (No room set)";
+      parts.push("<li style='padding:12px;background:#fff7ed;border-radius:10px;margin-bottom:8px;border-left:4px solid #ea580c;'>");
+      parts.push("<strong style='color:#ea580c;'>IN 2 DAYS (" + ex2.date + "):</strong> " + (ex2.courseCode || "") + " — " + ex2.title + "<span style='color:#64748b;font-size:12px;margin-left:4px;'>" + loc + "</span>");
+      parts.push("</li>");
     }
     parts.push("</ul>");
   }
 
-  if (deadlines.length) {
-    parts.push("<h3>Upcoming deadlines</h3><ul>");
-    for (var j = 0; j < deadlines.length; j++) {
-      var d = deadlines[j];
-      var when =
-        d.days === 0 ? "Due today" : d.days === 1 ? "Due tomorrow" : "Due in " + d.days + " days";
-      parts.push("<li><strong>" + d.course + "</strong> — " + d.title + " (" + when + ")</li>");
+  // 1. Assignments Section (2 days earlier and yesterday of deadline)
+  if (dueTomorrow.length > 0 || dueIn2Days.length > 0) {
+    parts.push("<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;'/>");
+    parts.push("<h3 style='color:#0f172a;margin-bottom:12px;font-size:16px;'>Upcoming Assignments</h3>");
+    parts.push("<div style='display:grid;gap:10px;'>");
+    for (var l = 0; l < dueTomorrow.length; l++) {
+      parts.push(buildAssignmentCardHtml("TOMORROW", dueTomorrow[l]));
     }
-    parts.push("</ul>");
+    for (var m = 0; m < dueIn2Days.length; m++) {
+      parts.push(buildAssignmentCardHtml("IN 2 DAYS", dueIn2Days[m]));
+    }
+    parts.push("</div>");
   }
 
-  parts.push("<p style='color:#666;font-size:12px'>Manage exams in the Exams tab and tap Sync exam emails.</p>");
+  parts.push("<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;'/>");
+  parts.push("<p style='color:#94a3b8;font-size:11px;text-align:center;margin-bottom:0;'>Manage notifications in University Command Center under Settings.</p>");
+  parts.push("</div>");
+
   return parts.join("");
+}
+
+function buildHolidayDigestHtml(tomorrow, breakMsg, dueTomorrow, dueIn2Days, examsTomorrow, examsIn2Days) {
+  var parts = ["<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;border:1px solid #e2e8f0;border-radius:16px;background:#ffffff;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);'>"];
+  parts.push("<h2 style='color:#7c3aed;margin-top:0;'>University Command Center</h2>");
+  parts.push("<p style='color:#64748b;font-size:14px;margin-bottom:20px;'>Daily schedule and reminder digest for tomorrow, <strong>" + tomorrow + "</strong>.</p>");
+  parts.push("<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;'/>");
+
+  // Break / Holiday
+  parts.push("<h3 style='color:#0f172a;margin-bottom:12px;font-size:16px;'>Classes Tomorrow</h3>");
+  parts.push("<p style='font-style:italic;color:#1e3a8a;background:#eff6ff;padding:16px;border-radius:10px;border-left:4px solid #3b82f6;margin:0;font-size:14px;line-height:1.5;'>🌴 " + breakMsg + "</p>");
+
+  // Exams
+  if (examsTomorrow.length > 0 || examsIn2Days.length > 0) {
+    parts.push("<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;'/>");
+    parts.push("<h3 style='color:#0f172a;margin-bottom:12px;font-size:16px;'>Upcoming Exams</h3>");
+    parts.push("<ul style='list-style:none;padding:0;margin:0;'>");
+    for (var j = 0; j < examsTomorrow.length; j++) {
+      var exT = examsTomorrow[j];
+      var loc = exT.location ? " (Room: " + exT.location + ")" : " (No room set)";
+      parts.push("<li style='padding:12px;background:#fef2f2;border-radius:10px;margin-bottom:8px;border-left:4px solid #dc2626;'>");
+      parts.push("<strong style='color:#dc2626;'>TOMORROW (" + exT.date + "):</strong> " + (exT.courseCode || "") + " — " + exT.title + "<span style='color:#64748b;font-size:12px;margin-left:4px;'>" + loc + "</span>");
+      parts.push("</li>");
+    }
+    for (var k = 0; k < examsIn2Days.length; k++) {
+      var ex2 = examsIn2Days[k];
+      var loc = ex2.location ? " (Room: " + ex2.location + ")" : " (No room set)";
+      parts.push("<li style='padding:12px;background:#fff7ed;border-radius:10px;margin-bottom:8px;border-left:4px solid #ea580c;'>");
+      parts.push("<strong style='color:#ea580c;'>IN 2 DAYS (" + ex2.date + "):</strong> " + (ex2.courseCode || "") + " — " + ex2.title + "<span style='color:#64748b;font-size:12px;margin-left:4px;'>" + loc + "</span>");
+      parts.push("</li>");
+    }
+    parts.push("</ul>");
+  }
+
+  // Assignments
+  if (dueTomorrow.length > 0 || dueIn2Days.length > 0) {
+    parts.push("<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;'/>");
+    parts.push("<h3 style='color:#0f172a;margin-bottom:12px;font-size:16px;'>Upcoming Assignments</h3>");
+    parts.push("<div style='display:grid;gap:10px;'>");
+    for (var l = 0; l < dueTomorrow.length; l++) {
+      parts.push(buildAssignmentCardHtml("TOMORROW", dueTomorrow[l]));
+    }
+    for (var m = 0; m < dueIn2Days.length; m++) {
+      parts.push(buildAssignmentCardHtml("IN 2 DAYS", dueIn2Days[m]));
+    }
+    parts.push("</div>");
+  }
+
+  parts.push("<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;'/>");
+  parts.push("<p style='color:#94a3b8;font-size:11px;text-align:center;margin-bottom:0;'>Manage notifications in University Command Center under Settings.</p>");
+  parts.push("</div>");
+
+  return parts.join("");
+}
+
+function buildAssignmentCardHtml(timeLabel, a) {
+  var borderCol = timeLabel === "TOMORROW" ? "#dc2626" : "#ea580c";
+  var bgCol = timeLabel === "TOMORROW" ? "#fef2f2" : "#fff7ed";
+  var labelCol = timeLabel === "TOMORROW" ? "#dc2626" : "#ea580c";
+
+  var room = a.roomNumber || "Not specified";
+  
+  var statusText = "To do";
+  if (a.status === "in_progress" || a.status === "in-progress") statusText = "In progress";
+  if (a.status === "done" || a.status === "completed") statusText = "Completed";
+
+  var subType = "Online";
+  if (a.submissionType === "hard_copy" || a.submissionType === "hard-copy") subType = "Hard copy";
+
+  var priorityLabel = (a.priority || "medium").toUpperCase();
+  var priorityColor = "#64748b";
+  if (a.priority === "high") priorityColor = "#ef4444";
+  if (a.priority === "medium") priorityColor = "#f59e0b";
+  if (a.priority === "low") priorityColor = "#10b981";
+
+  var dueStr = a.due;
+  if (dueStr.indexOf("T") > 0) dueStr = dueStr.substring(0, 10);
+
+  var html = "";
+  html += "<div style='padding:15px;background:" + bgCol + ";border-radius:10px;border-left:4px solid " + borderCol + ";margin-bottom:10px;'>";
+  html += "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;'>";
+  html += "<span style='font-size:11px;font-weight:bold;color:" + labelCol + ";text-transform:uppercase;'>" + timeLabel + " (" + dueStr + ")</span>";
+  html += "<span style='font-size:10px;background:" + priorityColor + ";color:#ffffff;padding:2px 6px;border-radius:4px;font-weight:bold;text-transform:uppercase;'>" + priorityLabel + "</span>";
+  html += "</div>";
+  html += "<h4 style='margin:0 0 6px 0;color:#0f172a;font-size:15px;'>" + a.title + "</h4>";
+  html += "<p style='margin:0 0 8px 0;font-size:12px;color:#475569;'><strong>Subject:</strong> " + a.course + "</p>";
+  
+  html += "<div style='display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:#64748b;border-top:1px dashed #e2e8f0;padding-top:8px;'>";
+  html += "<div><strong>Room:</strong> " + room + "</div>";
+  html += "<div><strong>Status:</strong> " + statusText + "</div>";
+  html += "<div><strong>Submission:</strong> " + subType + "</div>";
+  html += "</div>";
+  html += "</div>";
+  return html;
 }
 
 // ——— Remind to add marks after exam is done ———
@@ -383,7 +484,21 @@ function checkExamMarkReminders() {
   }
 }
 
-// ——— 7-day absence / inactivity ———
+function examsNeedingMark(data) {
+  var today = dateKey(new Date());
+  var list = data.exams || [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    var ex = list[i];
+    if (ex.status !== "done") continue;
+    if (ex.mark !== null && ex.mark !== undefined && ex.mark !== "") continue;
+    if (ex.date > today) continue;
+    out.push(ex);
+  }
+  return out;
+}
+
+// ——— 4. 7-day absence / inactivity ———
 
 function checkSevenDayAbsence() {
   var emails = listSyncedEmails();
@@ -406,32 +521,101 @@ function checkSevenDayAbsence() {
     if (data.lastAbsenceEmailAt === today) continue;
 
     var formUrl = data.adminFormUrl || "https://forms.google.com";
-    var html =
-      "<h2>We noticed you've been away</h2>" +
-      "<p>You haven't logged attendance in <strong>" +
-      diff +
-      " days</strong>. We'd like to know how you're doing:</p>" +
-      "<ul>" +
-      "<li>Are you ill or recovering?</li>" +
-      "<li>Busy with work, travel, or family?</li>" +
-      "<li>Feeling mental pressure or burnout?</li>" +
-      "</ul>" +
-      "<p>If you're under mental pressure, please reach out — you are not alone. " +
-      "Contact admin using this form:</p>" +
-      "<p><a href='" +
-      formUrl +
-      "'>Open support / admin form</a></p>" +
-      "<p style='color:#666;font-size:12px'>Open the app when you can to update attendance or sync your routine.</p>";
+    var html = buildAbsenceEmailHtml(diff, formUrl);
 
     MailApp.sendEmail({
       to: email,
-      subject: "Checking in · University Command Center",
+      subject: "We are worried about you · University Command Center",
       htmlBody: html,
     });
 
     data.lastAbsenceEmailAt = today;
     saveSync(email, data);
   }
+}
+
+function buildAbsenceEmailHtml(diff, formUrl) {
+  var html = "";
+  html += "<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:25px;border:1px solid #e2e8f0;border-radius:16px;background:#ffffff;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);'>";
+  html += "<h2 style='color:#dc2626;margin-top:0;'>University Command Center Check-in</h2>";
+  html += "<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;' />";
+  html += "<p style='font-size:16px;line-height:1.6;color:#334155;'>Hello,</p>";
+  html += "<p style='font-size:16px;line-height:1.6;color:#334155;'>";
+  html += "We noticed that you have not logged in or recorded your attendance for <strong>" + diff + " days</strong>.";
+  html += "</p>";
+  html += "<div style='background:#fef2f2;border-left:4px solid #ef4444;padding:16px;border-radius:8px;margin:20px 0;'>";
+  html += "<p style='margin:0;font-size:15px;color:#991b1b;font-weight:500;'>";
+  html += "You are absent for 7days. how admin team is so worried about you.";
+  html += "</p>";
+  html += "</div>";
+  html += "<p style='font-size:15px;line-height:1.6;color:#475569;'>";
+  html += "please fill-up the form to inform admin team why you are absent and thank you and all. also take care thing.";
+  html += "</p>";
+  html += "<p style='text-align:center;margin:30px 0;'>";
+  html += "<a href='" + formUrl + "' style='background:#7c3aed;color:#ffffff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:bold;display:inline-block;box-shadow:0 4px 10px rgba(124,58,237,0.3);'>";
+  html += "Fill up Absence / Support Form";
+  html += "</a>";
+  html += "</p>";
+  html += "<p style='font-size:15px;line-height:1.6;color:#475569;'>";
+  html += "Thank you and all. Please take care of yourself!";
+  html += "</p>";
+  html += "<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;' />";
+  html += "<p style='font-size:12px;color:#94a3b8;text-align:center;margin-bottom:0;'>";
+  html += "This is an automated check-in notification from your University Command Center portal.";
+  html += "</p>";
+  html += "</div>";
+  return html;
+}
+
+// ——— 5. Monthly Health Email ———
+
+function sendHealthEmail(email, data) {
+  var formUrl = data.adminFormUrl || "https://forms.google.com";
+  var html = buildHealthEmailHtml(formUrl);
+  MailApp.sendEmail({
+    to: email,
+    subject: "Taking care of your health · University Command Center",
+    htmlBody: html,
+  });
+}
+
+function buildHealthEmailHtml(formUrl) {
+  var html = "";
+  html += "<div style='font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:25px;border:1px solid #e2e8f0;border-radius:16px;background:#ffffff;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);'>";
+  html += "<h2 style='color:#059669;margin-top:0;'>🌿 Monthly Health & Wellbeing Check</h2>";
+  html += "<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;' />";
+  html += "<p style='font-size:16px;line-height:1.6;color:#334155;'>Hello,</p>";
+  html += "<p style='font-size:15px;line-height:1.6;color:#334155;'>";
+  html += "It's the 5th of the month! This is your gentle reminder to take a moment and focus on taking care of your health. ";
+  html += "Academics can be stressful, but your physical and mental wellbeing always come first.";
+  html += "</p>";
+  html += "<div style='background:#ecfdf5;border-left:4px solid #10b981;padding:16px;border-radius:8px;margin:20px 0;'>";
+  html += "<h4 style='margin:0 0 8px 0;color:#065f46;font-size:14px;text-transform:uppercase;letter-spacing:0.05em;'>Quick Health Checklist:</h4>";
+  html += "<ul style='margin:0;padding-left:20px;font-size:14px;color:#047857;line-height:1.6;'>";
+  html += "<li><strong>Stay Hydrated:</strong> Keep a water bottle nearby and drink at least 8 glasses of water today.</li>";
+  html += "<li><strong>Restful Sleep:</strong> Ensure you get 7-8 hours of sleep. Pulling all-nighters hurts cognitive function!</li>";
+  html += "<li><strong>Daily Movement:</strong> Stand up, stretch, and take a 10-minute walk outside.</li>";
+  html += "<li><strong>Mindfulness:</strong> Take 5 deep breaths and unplug from screens for a short break.</li>";
+  html += "</ul>";
+  html += "</div>";
+  html += "<p style='font-size:14px;line-height:1.6;color:#475569;'>";
+  html += "If you're feeling overwhelmed, burnt out, or need mental health guidance, please don't hesitate to reach out. ";
+  html += "The administrative support team is here to listen and help you.";
+  html += "</p>";
+  html += "<p style='text-align:center;margin:25px 0;'>";
+  html += "<a href='" + formUrl + "' style='background:#10b981;color:#ffffff;padding:12px 24px;border-radius:10px;text-decoration:none;font-weight:bold;display:inline-block;box-shadow:0 4px 10px rgba(16,185,129,0.3);'>";
+  html += "Open Support / Admin Form";
+  html += "</a>";
+  html += "</p>";
+  html += "<p style='font-size:15px;line-height:1.6;color:#334155;'>";
+  html += "Take care of yourself, stay safe, and have a wonderful month ahead!";
+  html += "</p>";
+  html += "<hr style='border:0;border-top:1px solid #f1f5f9;margin:20px 0;' />";
+  html += "<p style='font-size:12px;color:#94a3b8;text-align:center;margin-bottom:0;'>";
+  html += "University Command Center · Settings & Preferences can be managed in the portal.";
+  html += "</p>";
+  html += "</div>";
+  return html;
 }
 
 function json(obj) {

@@ -16,7 +16,15 @@ export type SyncPayload = {
     isClass?: boolean;
   }[];
   courses: { id: string; code: string; name: string }[];
-  assignments: { title: string; course: string; due: string; status: string }[];
+  assignments: {
+    title: string;
+    course: string;
+    due: string;
+    status: string;
+    priority: string;
+    roomNumber: string | null;
+    submissionType: string | null;
+  }[];
   examDates: { courseCode: string; courseId: string; date: string }[];
   exams: {
     id: string;
@@ -27,6 +35,8 @@ export type SyncPayload = {
     status: string;
     mark?: number | null;
     maxMark?: number;
+    location?: string | null;
+    createdAt: string;
   }[];
   lastAttendanceDate: string | null;
   notificationsEnabled: boolean;

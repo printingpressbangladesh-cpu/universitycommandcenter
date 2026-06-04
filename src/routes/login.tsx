@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { GraduationCap, Sparkles, Loader2 } from "lucide-react";
 import { getAdminCredentials } from "@/lib/admin";
 
-const OTP_CONFIGURED = !!import.meta.env.VITE_OTP_API_URL;
+const OTP_CONFIGURED = false;
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
