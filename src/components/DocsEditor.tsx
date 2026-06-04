@@ -232,6 +232,27 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
         .rich-editor-content p {
           margin: 8px 0;
         }
+        .rich-editor-content h1 {
+          font-size: 1.75em;
+          font-weight: 700;
+          margin-top: 1.2em;
+          margin-bottom: 0.4em;
+          line-height: 1.25;
+        }
+        .rich-editor-content h2 {
+          font-size: 1.4em;
+          font-weight: 600;
+          margin-top: 1.1em;
+          margin-bottom: 0.4em;
+          line-height: 1.3;
+        }
+        .rich-editor-content h3 {
+          font-size: 1.2em;
+          font-weight: 600;
+          margin-top: 1em;
+          margin-bottom: 0.3em;
+          line-height: 1.35;
+        }
 
         /* Screen spacing scroll logic for paper pages */
         .docs-page-container {
@@ -319,6 +340,21 @@ export function DocsEditor({ value, onChange, placeholder, noteId }: DocsEditorP
           >
             <Underline className="h-4 w-4" />
           </Button>
+
+          <select
+            onChange={(e) => {
+              executeCommand("formatBlock", e.target.value);
+            }}
+            value=""
+            className="h-8 text-xs bg-secondary border border-border/60 rounded-xl px-2 text-muted-foreground focus:text-foreground outline-none cursor-pointer"
+            title="Text Style"
+          >
+            <option value="" disabled hidden>Style</option>
+            <option value="<p>">Normal Text</option>
+            <option value="<h1>">Heading 1</option>
+            <option value="<h2>">Heading 2</option>
+            <option value="<h3>">Heading 3</option>
+          </select>
 
           <div className="h-4 w-[1px] bg-border/60 mx-1" />
 
