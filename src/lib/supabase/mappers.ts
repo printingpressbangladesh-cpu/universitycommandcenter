@@ -80,6 +80,8 @@ export function rowToAssignment(r: Record<string, unknown>): Assignment {
     priority: r.priority as Assignment["priority"],
     status: r.status as Assignment["status"],
     progress: Number(r.progress ?? 0),
+    mark: r.mark != null ? Number(r.mark) : null,
+    maxMark: r.max_mark != null ? Number(r.max_mark) : null,
   };
 }
 
@@ -93,6 +95,8 @@ export function assignmentToRow(userId: string, a: Assignment) {
     priority: a.priority,
     status: a.status,
     progress: a.progress,
+    mark: a.mark ?? null,
+    max_mark: a.maxMark ?? null,
   };
 }
 

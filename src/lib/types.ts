@@ -22,6 +22,8 @@ export type Assignment = {
   priority: "low" | "medium" | "high";
   status: "todo" | "in_progress" | "done";
   progress: number;
+  mark?: number | null;
+  maxMark?: number | null;
 };
 
 export type Note = {

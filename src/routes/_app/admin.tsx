@@ -10,6 +10,7 @@ import {
   getStudentProfiles,
   getTeamMembers,
   removeTeamMember,
+  removeStudentUser,
   type StudentAdminProfile,
   type TeamMemberProfile,
 } from "@/lib/usersAdmin";
@@ -139,6 +140,18 @@ function AdminPage() {
     await reloadDirectory();
   };
 
+  const handleRemoveStudent = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to permanently remove student ${name}? This will delete all of their course data, attendance logs, exam schedules, routines, and assignments. This action CANNOT be undone.`)) return;
+    try {
+      const { error } = await removeStudentUser(id);
+      if (error) return toast.error(error);
+      toast.success("Student account and all associated data permanently removed");
+      await reloadDirectory();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove student");
+    }
+  };
+
   const staffTeam = team.filter((m) => m.role !== "admin");
 
   return (
@@ -251,6 +264,17 @@ function AdminPage() {
                           ) : (
                             <p className="mt-3 text-xs text-muted-foreground">No courses added yet.</p>
                           )}
+                          <div className="mt-4 flex justify-end border-t border-border/60 pt-3">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30 gap-1.5"
+                              onClick={() => void handleRemoveStudent(s.id, s.fullName)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" /> Remove Student Account
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </li>

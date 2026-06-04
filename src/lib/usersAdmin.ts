@@ -9,4 +9,5 @@ export {
   getStudentProfiles,
   getTeamMembers,
   removeTeamMember,
+  removeStudentUser,
 } from "./supabase/usersAdmin";

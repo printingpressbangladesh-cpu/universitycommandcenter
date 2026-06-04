@@ -32,19 +32,21 @@ function ExamsPage() {
   const [markDraft, setMarkDraft] = useState<Record<string, string>>({});
   const [maxDraft, setMaxDraft] = useState<Record<string, string>>({});
 
+  const [subjectFilter, setSubjectFilter] = useState<string>("all");
+
   const upcoming = useMemo(
     () =>
       exams
-        .filter((e) => e.status === "upcoming" && !isPastDate(e.date))
+        .filter((e) => e.status === "upcoming" && !isPastDate(e.date) && (subjectFilter === "all" || e.courseId === subjectFilter))
         .sort((a, b) => a.date.localeCompare(b.date)),
-    [exams],
+    [exams, subjectFilter],
   );
   const completed = useMemo(
     () =>
       exams
-        .filter((e) => e.status === "done" || isPastDate(e.date))
+        .filter((e) => (e.status === "done" || isPastDate(e.date)) && (subjectFilter === "all" || e.courseId === subjectFilter))
         .sort((a, b) => b.date.localeCompare(a.date)),
-    [exams],
+    [exams, subjectFilter],
   );
 
   const latestExam = upcoming[0] ?? null;
@@ -111,11 +113,52 @@ function ExamsPage() {
               Schedule exams and record marks. Past dates skip straight to marking. Use Exam Prep for revision.
             </p>
           </div>
-          <Button type="button" variant="outline" className="gap-2" onClick={() => void syncExamsEmail()}>
-            <Mail className="h-4 w-4" /> Sync exam emails
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="button" variant="outline" className="gap-2" onClick={() => void syncExamsEmail()}>
+              <Mail className="h-4 w-4" /> Sync exam emails
+            </Button>
+          </div>
         </div>
       </header>
+
+      {/* Subject filter bar — always visible when courses exist */}
+      {courses.length > 0 && (
+        <div className="glass-strong rounded-2xl px-5 py-3 flex flex-wrap items-center gap-3">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Filter by subject</span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSubjectFilter("all")}
+              className={`rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+                subjectFilter === "all"
+                  ? "bg-primary text-primary-foreground shadow-glow"
+                  : "bg-secondary/50 text-muted-foreground hover:bg-secondary"
+              }`}
+            >
+              All subjects
+            </button>
+            {courses.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setSubjectFilter(subjectFilter === c.id ? "all" : c.id)}
+                className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                  subjectFilter === c.id
+                    ? "shadow-sm"
+                    : "bg-secondary/50 text-muted-foreground hover:bg-secondary"
+                }`}
+                style={subjectFilter === c.id ? {
+                  background: `color-mix(in oklab, ${c.color} 25%, transparent)`,
+                  color: c.color,
+                  border: `1px solid ${c.color}55`,
+                } : {}}
+              >
+                {c.code}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {latestExam && (
         <section className="glass-strong relative overflow-hidden rounded-3xl border border-primary/30 p-6 md:p-8">

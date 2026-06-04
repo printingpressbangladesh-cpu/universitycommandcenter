@@ -88,7 +88,9 @@ create table if not exists public.assignments (
   due timestamptz not null,
   priority text default 'medium',
   status text default 'todo',
-  progress int default 0
+  progress int default 0,
+  mark numeric,
+  max_mark numeric
 );
 
 create table if not exists public.notes (

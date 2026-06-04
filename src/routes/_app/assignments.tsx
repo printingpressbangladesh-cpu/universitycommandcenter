@@ -4,7 +4,7 @@ import { useAssignments } from "@/lib/assignmentsStore";
 import { useCourses } from "@/lib/coursesStore";
 import type { Assignment } from "@/lib/types";
 import { CourseSelect } from "@/components/CourseSelect";
-import { Search, Plus } from "lucide-react";
+import { Search, Plus, Award, Edit2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,7 +30,7 @@ const columns: { id: Assignment["status"]; title: string; tone: string }[] = [
 
 function AssignmentsPage() {
   const { courses } = useCourses();
-  const { assignments: items, setAssignments: setItems, addAssignment } = useAssignments();
+  const { assignments: items, setAssignments: setItems, addAssignment, updateAssignment } = useAssignments();
   const [q, setQ] = useState("");
   const [subject, setSubject] = useState<string>("all");
   const [dragId, setDragId] = useState<string | null>(null);
@@ -39,6 +39,11 @@ function AssignmentsPage() {
   const [course, setCourse] = useState("none");
   const [due, setDue] = useState("");
   const [priority, setPriority] = useState<Assignment["priority"]>("medium");
+
+  // Mark editing state
+  const [markingId, setMarkingId] = useState<string | null>(null);
+  const [markDraft, setMarkDraft] = useState("");
+  const [maxMarkDraft, setMaxMarkDraft] = useState("");
 
   const filtered = useMemo(() => {
     return items.filter(
@@ -77,6 +82,8 @@ function AssignmentsPage() {
       priority,
       status: "todo",
       progress: 0,
+      mark: null,
+      maxMark: null,
     });
     setTitle("");
     setCourse("none");
@@ -84,6 +91,28 @@ function AssignmentsPage() {
     setPriority("medium");
     setOpen(false);
     toast.success("Assignment created");
+  };
+
+  const startMarking = (a: Assignment) => {
+    setMarkingId(a.id);
+    setMarkDraft(a.mark != null ? String(a.mark) : "");
+    setMaxMarkDraft(a.maxMark != null ? String(a.maxMark) : "");
+  };
+
+  const saveMark = (id: string) => {
+    const mark = markDraft !== "" ? Number(markDraft) : null;
+    const maxMark = maxMarkDraft !== "" ? Number(maxMarkDraft) : null;
+    if (mark !== null && (Number.isNaN(mark) || mark < 0)) {
+      toast.error("Enter a valid mark");
+      return;
+    }
+    if (maxMark !== null && (Number.isNaN(maxMark) || maxMark <= 0)) {
+      toast.error("Enter a valid max mark");
+      return;
+    }
+    updateAssignment(id, { mark, maxMark });
+    setMarkingId(null);
+    toast.success("Mark saved");
   };
 
   return (
@@ -220,6 +249,89 @@ function AssignmentsPage() {
                     </span>
                     <span>{a.progress}%</span>
                   </div>
+
+                  {/* Mark section — only on completed cards */}
+                  {col.id === "done" && (
+                    <div className="mt-3 border-t border-border/40 pt-3">
+                      {markingId === a.id ? (
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-primary">Record mark</p>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <div className="space-y-0.5">
+                              <Label className="text-[10px]">Mark</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={markDraft}
+                                onChange={(e) => setMarkDraft(e.target.value)}
+                                placeholder="85"
+                                className="h-7 text-xs"
+                              />
+                            </div>
+                            <div className="space-y-0.5">
+                              <Label className="text-[10px]">Out of</Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                value={maxMarkDraft}
+                                onChange={(e) => setMaxMarkDraft(e.target.value)}
+                                placeholder="100"
+                                className="h-7 text-xs"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex gap-1.5">
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-7 flex-1 text-xs bg-gradient-primary text-primary-foreground"
+                              onClick={() => saveMark(a.id)}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-xs"
+                              onClick={() => setMarkingId(null)}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : a.mark != null ? (
+                        <div className="flex items-center justify-between rounded-lg border border-[color:var(--success)]/30 bg-[color:var(--success)]/10 px-2.5 py-2">
+                          <div className="flex items-center gap-1.5">
+                            <Award className="h-3.5 w-3.5 text-[color:var(--success)]" />
+                            <span className="text-xs font-semibold">
+                              {a.mark}{a.maxMark != null ? ` / ${a.maxMark}` : ""}
+                              {a.maxMark != null && (
+                                <span className="ml-1 font-normal text-muted-foreground">
+                                  ({Math.round((a.mark / a.maxMark) * 100)}%)
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => startMarking(a)}
+                            className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
+                          >
+                            <Edit2 className="h-3 w-3" /> Edit
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => startMarking(a)}
+                          className="w-full rounded-lg border border-dashed border-border/60 py-1.5 text-[11px] text-muted-foreground hover:border-primary/40 hover:text-primary transition"
+                        >
+                          + Add mark
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </article>
               ))}
             </div>
