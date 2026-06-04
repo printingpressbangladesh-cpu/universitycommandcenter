@@ -24,7 +24,9 @@ import { Route as AppCalendarRouteImport } from './routes/_app/calendar'
 import { Route as AppAttendanceRouteImport } from './routes/_app/attendance'
 import { Route as AppAssignmentsRouteImport } from './routes/_app/assignments'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
+import { Route as AppNotesIndexRouteImport } from './routes/_app/notes.index'
 import { Route as AppCoursesIndexRouteImport } from './routes/_app/courses.index'
+import { Route as AppNotesNoteIdRouteImport } from './routes/_app/notes.$noteId'
 import { Route as AppCoursesCourseIdRouteImport } from './routes/_app/courses.$courseId'
 
 const LoginRoute = LoginRouteImport.update({
@@ -101,10 +103,20 @@ const AppAdminRoute = AppAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => AppRoute,
 } as any)
+const AppNotesIndexRoute = AppNotesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppNotesRoute,
+} as any)
 const AppCoursesIndexRoute = AppCoursesIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppCoursesRoute,
+} as any)
+const AppNotesNoteIdRoute = AppNotesNoteIdRouteImport.update({
+  id: '/$noteId',
+  path: '/$noteId',
+  getParentRoute: () => AppNotesRoute,
 } as any)
 const AppCoursesCourseIdRoute = AppCoursesCourseIdRouteImport.update({
   id: '/$courseId',
@@ -123,12 +135,14 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AppDashboardRoute
   '/exam-prep': typeof AppExamPrepRoute
   '/exams': typeof AppExamsRoute
-  '/notes': typeof AppNotesRoute
+  '/notes': typeof AppNotesRouteWithChildren
   '/routine': typeof AppRoutineRoute
   '/settings': typeof AppSettingsRoute
   '/study': typeof AppStudyRoute
   '/courses/$courseId': typeof AppCoursesCourseIdRoute
+  '/notes/$noteId': typeof AppNotesNoteIdRoute
   '/courses/': typeof AppCoursesIndexRoute
+  '/notes/': typeof AppNotesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -140,12 +154,13 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AppDashboardRoute
   '/exam-prep': typeof AppExamPrepRoute
   '/exams': typeof AppExamsRoute
-  '/notes': typeof AppNotesRoute
   '/routine': typeof AppRoutineRoute
   '/settings': typeof AppSettingsRoute
   '/study': typeof AppStudyRoute
   '/courses/$courseId': typeof AppCoursesCourseIdRoute
+  '/notes/$noteId': typeof AppNotesNoteIdRoute
   '/courses': typeof AppCoursesIndexRoute
+  '/notes': typeof AppNotesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -160,12 +175,14 @@ export interface FileRoutesById {
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/exam-prep': typeof AppExamPrepRoute
   '/_app/exams': typeof AppExamsRoute
-  '/_app/notes': typeof AppNotesRoute
+  '/_app/notes': typeof AppNotesRouteWithChildren
   '/_app/routine': typeof AppRoutineRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/study': typeof AppStudyRoute
   '/_app/courses/$courseId': typeof AppCoursesCourseIdRoute
+  '/_app/notes/$noteId': typeof AppNotesNoteIdRoute
   '/_app/courses/': typeof AppCoursesIndexRoute
+  '/_app/notes/': typeof AppNotesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -185,7 +202,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/study'
     | '/courses/$courseId'
+    | '/notes/$noteId'
     | '/courses/'
+    | '/notes/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -197,12 +216,13 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/exam-prep'
     | '/exams'
-    | '/notes'
     | '/routine'
     | '/settings'
     | '/study'
     | '/courses/$courseId'
+    | '/notes/$noteId'
     | '/courses'
+    | '/notes'
   id:
     | '__root__'
     | '/'
@@ -221,7 +241,9 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/study'
     | '/_app/courses/$courseId'
+    | '/_app/notes/$noteId'
     | '/_app/courses/'
+    | '/_app/notes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -337,12 +359,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/notes/': {
+      id: '/_app/notes/'
+      path: '/'
+      fullPath: '/notes/'
+      preLoaderRoute: typeof AppNotesIndexRouteImport
+      parentRoute: typeof AppNotesRoute
+    }
     '/_app/courses/': {
       id: '/_app/courses/'
       path: '/'
       fullPath: '/courses/'
       preLoaderRoute: typeof AppCoursesIndexRouteImport
       parentRoute: typeof AppCoursesRoute
+    }
+    '/_app/notes/$noteId': {
+      id: '/_app/notes/$noteId'
+      path: '/$noteId'
+      fullPath: '/notes/$noteId'
+      preLoaderRoute: typeof AppNotesNoteIdRouteImport
+      parentRoute: typeof AppNotesRoute
     }
     '/_app/courses/$courseId': {
       id: '/_app/courses/$courseId'
@@ -368,6 +404,20 @@ const AppCoursesRouteWithChildren = AppCoursesRoute._addFileChildren(
   AppCoursesRouteChildren,
 )
 
+interface AppNotesRouteChildren {
+  AppNotesNoteIdRoute: typeof AppNotesNoteIdRoute
+  AppNotesIndexRoute: typeof AppNotesIndexRoute
+}
+
+const AppNotesRouteChildren: AppNotesRouteChildren = {
+  AppNotesNoteIdRoute: AppNotesNoteIdRoute,
+  AppNotesIndexRoute: AppNotesIndexRoute,
+}
+
+const AppNotesRouteWithChildren = AppNotesRoute._addFileChildren(
+  AppNotesRouteChildren,
+)
+
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
   AppAssignmentsRoute: typeof AppAssignmentsRoute
@@ -377,7 +427,7 @@ interface AppRouteChildren {
   AppDashboardRoute: typeof AppDashboardRoute
   AppExamPrepRoute: typeof AppExamPrepRoute
   AppExamsRoute: typeof AppExamsRoute
-  AppNotesRoute: typeof AppNotesRoute
+  AppNotesRoute: typeof AppNotesRouteWithChildren
   AppRoutineRoute: typeof AppRoutineRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStudyRoute: typeof AppStudyRoute
@@ -392,7 +442,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDashboardRoute: AppDashboardRoute,
   AppExamPrepRoute: AppExamPrepRoute,
   AppExamsRoute: AppExamsRoute,
-  AppNotesRoute: AppNotesRoute,
+  AppNotesRoute: AppNotesRouteWithChildren,
   AppRoutineRoute: AppRoutineRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStudyRoute: AppStudyRoute,
