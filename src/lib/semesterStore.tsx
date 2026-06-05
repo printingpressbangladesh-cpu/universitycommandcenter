@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import {
   ensureSemester,
@@ -22,6 +22,7 @@ import { getSystemEmailConfig, saveSystemEmailConfig } from "@/lib/systemConfig"
 import { syncNotifications, getDefaultAdminFormUrl } from "@/lib/notificationsApi";
 import { emitDataChanged } from "@/lib/events";
 import { todayKey } from "@/lib/scheduleUtils";
+import { toast } from "sonner";
 import type { AttendanceLog, Holiday, NotificationPrefs, SemesterPeriod } from "@/lib/types";
 
 type SemesterContextValue = {
@@ -79,6 +80,7 @@ export function SemesterProvider({ children }: { children: ReactNode }) {
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [attendanceLogs, setAttendanceLogs] = useState<AttendanceLog[]>([]);
   const [prefs, setPrefs] = useState<NotificationPrefs | null>(null);
+  const autoSyncedRef = useRef(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -351,6 +353,24 @@ export function SemesterProvider({ children }: { children: ReactNode }) {
     await saveSystemEmailConfig({ lastSyncedAt: syncedAt });
     if (prefs) await saveNotificationPrefs({ lastSyncedAt: syncedAt });
   }, [prefs, user, userId, semester, holidays, lastAttendanceDate, saveNotificationPrefs]);
+
+  // ——— Auto-sync on login for existing accounts ———
+  // Fires once per session after all data is loaded, if email reminders are enabled.
+  useEffect(() => {
+    if (!userId || !prefs || !semester || autoSyncedRef.current) return;
+    autoSyncedRef.current = true;
+    void (async () => {
+      try {
+        const system = await getSystemEmailConfig();
+        if (!system.enabled) return; // reminders disabled by admin — skip silently
+        await syncToGoogle();
+        toast.success("✓ Email reminders synced", { duration: 2500 });
+      } catch {
+        // silent on auto-sync — don't bother the user if it fails
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, prefs, semester]);
 
   const value = useMemo(
     () => ({

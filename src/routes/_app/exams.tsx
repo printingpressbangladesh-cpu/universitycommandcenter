@@ -6,7 +6,7 @@ import { useExams } from "@/lib/examsStore";
 import { useSemester } from "@/lib/semesterStore";
 import { daysUntilDate, formatExamDateLong, isPastDate } from "@/lib/scheduleUtils";
 import type { ExamEntry } from "@/lib/types";
-import { GraduationCap, Plus, Trash2, Mail, Award, Calendar } from "lucide-react";
+import { GraduationCap, Plus, Trash2, Award, Calendar } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -78,9 +78,8 @@ function ExamsPage() {
     try {
       if (user?.email) await saveNotificationPrefs({ email: user.email });
       await syncToGoogle();
-      toast.success("Exam schedule synced");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Email sync failed");
+    } catch {
+      // silent – auto-sync failures don't interrupt the user
     }
   };
 
@@ -113,11 +112,7 @@ function ExamsPage() {
               Schedule exams and record marks. Past dates skip straight to marking. Use Exam Prep for revision.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" variant="outline" className="gap-2" onClick={() => void syncExamsEmail()}>
-              <Mail className="h-4 w-4" /> Sync exam emails
-            </Button>
-          </div>
+
         </div>
       </header>
 

@@ -74,8 +74,8 @@ function SettingsPage() {
         <section className="glass-strong rounded-3xl p-6">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Email reminders</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Class reminders, deadlines, and wellness check-ins are configured by your administrator. Use{" "}
-            <strong>Sync email reminders</strong> on Routine or Exams after your admin enables them.
+            Class reminders, deadlines, and wellness check-ins are configured by your administrator.
+            Once enabled, your data syncs <strong>automatically</strong> every time you log in — no manual action needed.
           </p>
         </section>
       )}

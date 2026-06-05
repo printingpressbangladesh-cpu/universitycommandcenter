@@ -5,7 +5,7 @@ import { useSemester } from "@/lib/semesterStore";
 import { useCourses } from "@/lib/coursesStore";
 import { useAuth } from "@/lib/auth";
 import { ROUTINE_DAYS } from "@/lib/scheduleUtils";
-import { Plus, Trash2, CalendarRange, Download } from "lucide-react";
+import { Plus, Trash2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,7 +27,7 @@ function RoutinePage() {
   const { user } = useAuth();
   const { courses } = useCourses();
   const { blocks, days, addBlock, removeBlock } = useRoutine();
-  const { semester, holidays, setSemester, addHoliday, removeHoliday, saveNotificationPrefs, syncToGoogle, prefs } =
+  const { semester, holidays, setSemester, addHoliday, removeHoliday, syncToGoogle, prefs } =
     useSemester();
 
   const [day, setDay] = useState<RoutineBlock["day"]>("Mon");
@@ -85,15 +85,7 @@ function RoutinePage() {
     toast.success("Holiday saved");
   };
 
-  const handleSync = async () => {
-    try {
-      if (user?.email) await saveNotificationPrefs({ email: user.email });
-      await syncToGoogle();
-      toast.success("Synced — daily emails will include your routine & deadlines");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Sync failed");
-    }
-  };
+
 
   const blockLabel = (b: RoutineBlock) => {
     const c = courses.find((x) => x.id === b.courseId);
@@ -308,9 +300,7 @@ function RoutinePage() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <Button type="button" variant="outline" onClick={() => void handleSync()} className="gap-2 cursor-pointer">
-            <CalendarRange className="h-4 w-4" /> Sync email reminders
-          </Button>
+
         </div>
       </header>
 
@@ -440,7 +430,7 @@ function RoutinePage() {
         )}
         {!prefs?.enabled && (
           <p className="mt-3 text-xs text-muted-foreground">
-            Enable email reminders in Settings and sync to get one email with tomorrow&apos;s classes and deadline alerts.
+            Email reminders sync automatically when enabled by your administrator.
           </p>
         )}
       </section>
