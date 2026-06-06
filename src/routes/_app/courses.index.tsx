@@ -29,11 +29,13 @@ function CoursesPage() {
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editPlanned, setEditPlanned] = useState(28);
+  const [editTargetAttendance, setEditTargetAttendance] = useState(75);
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [faculty, setFaculty] = useState("");
   const [credits, setCredits] = useState(3);
   const [plannedClasses, setPlannedClasses] = useState(28);
+  const [targetAttendance, setTargetAttendance] = useState(75);
   const [color, setColor] = useState(COLORS[0]);
 
   const resetForm = () => {
@@ -43,6 +45,7 @@ function CoursesPage() {
     setCredits(3);
     setPlannedClasses(28);
     setColor(COLORS[0]);
+    setTargetAttendance(75);
   };
 
   const handleAdd = (e: React.FormEvent) => {
@@ -56,6 +59,7 @@ function CoursesPage() {
       plannedClasses,
       color,
       weakTopics: [],
+      targetAttendance,
     });
     setOpen(false);
     resetForm();
@@ -64,7 +68,7 @@ function CoursesPage() {
   const savePlanned = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editId || editPlanned < 1) return;
-    updateCourse(editId, { plannedClasses: editPlanned });
+    updateCourse(editId, { plannedClasses: editPlanned, targetAttendance: editTargetAttendance });
     setEditId(null);
   };
 
@@ -111,6 +115,10 @@ function CoursesPage() {
                 <Input type="number" min={1} value={plannedClasses} onChange={(e) => setPlannedClasses(Number(e.target.value))} />
               </div>
               <div className="space-y-2">
+                <Label>Target Attendance (%)</Label>
+                <Input type="number" min={50} max={100} value={targetAttendance} onChange={(e) => setTargetAttendance(Number(e.target.value))} />
+              </div>
+              <div className="space-y-2">
                 <Label>Accent color</Label>
                 <CourseSelect
                   value={color}
@@ -133,6 +141,10 @@ function CoursesPage() {
             <div className="space-y-2">
               <Label>Total classes you expect this semester</Label>
               <Input type="number" min={1} value={editPlanned} onChange={(e) => setEditPlanned(Number(e.target.value))} required />
+            </div>
+            <div className="space-y-2">
+              <Label>Target Attendance (%)</Label>
+              <Input type="number" min={50} max={100} value={editTargetAttendance} onChange={(e) => setEditTargetAttendance(Number(e.target.value))} required />
             </div>
             <Button type="submit" className="w-full">Save</Button>
           </form>
@@ -170,7 +182,7 @@ function CoursesPage() {
                   <p className="text-xs text-muted-foreground">{c.faculty}</p>
 
                   <div className="mt-5 text-sm">
-                    <Metric label="Attendance" value={`${c.attendance}%`} tone={c.attendance < 75 ? "warn" : "ok"} />
+                    <Metric label={`Attendance (Target: ${c.targetAttendance ?? 75}%)`} value={`${c.attendance}%`} tone={c.attendance < (c.targetAttendance ?? 75) ? "warn" : "ok"} />
                   </div>
 
                   <div className="mt-3 flex items-center justify-between rounded-xl border border-border/60 bg-secondary/30 px-3 py-2 text-xs">
@@ -182,6 +194,7 @@ function CoursesPage() {
                       onClick={() => {
                         setEditId(c.id);
                         setEditPlanned(c.plannedClasses);
+                        setEditTargetAttendance(c.targetAttendance ?? 75);
                       }}
                       className="inline-flex items-center gap-1 text-primary hover:underline"
                     >

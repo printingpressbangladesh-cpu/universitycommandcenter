@@ -49,6 +49,7 @@ export function rowToCourse(r: Record<string, unknown>): Course {
     progress: Number(r.progress ?? 0),
     weakTopics: (r.weak_topics as string[]) ?? [],
     color: (r.color as string) ?? "#6366f1",
+    targetAttendance: r.target_attendance != null ? Number(r.target_attendance) : 75,
   };
 }
 
@@ -68,6 +69,7 @@ export function courseToRow(userId: string, c: Course) {
     progress: c.progress,
     weak_topics: c.weakTopics,
     color: c.color,
+    target_attendance: c.targetAttendance ?? 75,
   };
 }
 
@@ -274,6 +276,8 @@ export function rowToSemester(userId: string, r: Record<string, unknown>): Semes
     startDate: r.start_date as string,
     endDate: r.end_date as string,
     label: (r.label as string) || undefined,
+    targetWeeklyStudyMinutes: r.target_weekly_study_minutes != null ? Number(r.target_weekly_study_minutes) : 600,
+    lastClassDate: (r.last_class_date as string) || undefined,
   };
 }
 
@@ -283,6 +287,8 @@ export function semesterToRow(s: SemesterPeriod) {
     start_date: s.startDate,
     end_date: s.endDate,
     label: s.label ?? null,
+    target_weekly_study_minutes: s.targetWeeklyStudyMinutes ?? 600,
+    last_class_date: s.lastClassDate ?? null,
   };
 }
 

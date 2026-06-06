@@ -30,7 +30,7 @@ type SemesterContextValue = {
   holidays: Holiday[];
   attendanceLogs: AttendanceLog[];
   prefs: NotificationPrefs | null;
-  setSemester: (patch: Partial<SemesterPeriod>) => void;
+  setSemester: (patch: Partial<SemesterPeriod>) => Promise<void>;
   addHoliday: (h: Omit<Holiday, "id" | "userId">) => void;
   removeHoliday: (id: string) => void;
   recordClassAttendance: (params: {
@@ -104,14 +104,25 @@ export function SemesterProvider({ children }: { children: ReactNode }) {
   }, [userId, user?.email]);
 
   const setSemester = useCallback(
-    (patch: Partial<SemesterPeriod>) => {
+    async (patch: Partial<SemesterPeriod>) => {
       if (!userId) return;
+      let previousSemester: SemesterPeriod | null = null;
       setSemesterState((prev) => {
+        previousSemester = prev;
         const base = prev ?? { userId, startDate: "", endDate: "" };
-        const next = { ...base, ...patch, userId };
-        void upsertSemester(next);
-        return next;
+        return { ...base, ...patch, userId };
       });
+      try {
+        const base = previousSemester ?? { userId, startDate: "", endDate: "" };
+        const next = { ...base, ...patch, userId };
+        await upsertSemester(next);
+      } catch (err: any) {
+        console.error("Failed to save semester settings:", err);
+        toast.error(`Database Error: ${err.message || "Failed to save semester settings. Please run the SQL migration."}`);
+        if (previousSemester) {
+          setSemesterState(previousSemester);
+        }
+      }
     },
     [userId],
   );

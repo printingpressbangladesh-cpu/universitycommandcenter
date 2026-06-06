@@ -22,7 +22,7 @@ function CalendarPage() {
   const { assignments } = useAssignments();
   const { blocks } = useRoutine();
   const { semester, holidays } = useSemester();
-  const { courses } = useCourses();
+  const { courses, examDates } = useCourses();
   const { exams } = useExams();
   const [cursor, setCursor] = useState(() => {
     const d = new Date();
@@ -55,7 +55,6 @@ function CalendarPage() {
     }
 
     for (const a of assignments) {
-      if (a.status === "done") continue;
       const d = new Date(a.due);
       if (d >= monthStart && d <= monthEnd) {
         const c = courses.find((x) => x.code === a.course);
@@ -63,13 +62,15 @@ function CalendarPage() {
           id: `a-${a.id}`,
           date: d,
           title: a.title,
-          subtitle: `Due · ${a.course}`,
+          subtitle: a.status === "done" ? `Done · ${a.course}` : `Due · ${a.course}`,
           color:
-            a.priority === "high"
-              ? "var(--destructive)"
-              : a.priority === "medium"
-                ? "var(--warning)"
-                : "var(--success)",
+            a.status === "done"
+              ? "var(--muted-foreground)"
+              : a.priority === "high"
+                ? "var(--destructive)"
+                : a.priority === "medium"
+                  ? "var(--warning)"
+                  : "var(--success)",
           kind: "assignment",
         });
       }
@@ -84,6 +85,23 @@ function CalendarPage() {
           date: d,
           title: ex.title,
           subtitle: c ? `${c.code}${ex.status === "done" ? " · done" : ""}` : ex.status,
+          color: "var(--purple)",
+          kind: "exam",
+        });
+      }
+    }
+
+    // Add course-specific exam dates
+    for (const [courseId, isoDate] of Object.entries(examDates)) {
+      if (!isoDate) continue;
+      const c = courses.find((x) => x.id === courseId);
+      const d = parseDateKey(isoDate.slice(0, 10));
+      if (d >= monthStart && d <= monthEnd) {
+        list.push({
+          id: `course-exam-${courseId}`,
+          date: d,
+          title: c ? `${c.code} Exam` : "Exam",
+          subtitle: c ? c.code : "Exam",
           color: "var(--purple)",
           kind: "exam",
         });
@@ -110,7 +128,7 @@ function CalendarPage() {
     }
 
     return list;
-  }, [blocks, semester, holidays, assignments, courses, exams, monthStart, monthEnd]);
+  }, [blocks, semester, holidays, assignments, courses, exams, examDates, monthStart, monthEnd]);
 
   const grid = useMemo(() => {
     const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);

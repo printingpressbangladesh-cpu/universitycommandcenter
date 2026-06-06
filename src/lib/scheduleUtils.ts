@@ -112,9 +112,12 @@ export function expandRoutineDates(
   const end = new Date(to);
   end.setHours(23, 59, 59, 999);
 
+  const classEndDate = semester?.lastClassDate || semester?.endDate || "";
+
   while (cur <= end) {
     const key = dateKey(cur);
-    if (isWithinSemester(key, semester) && !isHoliday(key, holidays)) {
+    const inClassPeriod = semester ? (key >= semester.startDate && key <= classEndDate) : true;
+    if (inClassPeriod && !isHoliday(key, holidays)) {
       for (const block of routineBlocksForDate(blocks, cur)) {
         out.push({ date: key, block });
       }

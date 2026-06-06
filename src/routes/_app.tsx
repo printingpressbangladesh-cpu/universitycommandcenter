@@ -5,7 +5,7 @@ import { useTheme } from "@/lib/theme";
 import {
   LayoutDashboard, BookOpen, ClipboardList, CalendarCheck2,
   Timer, GraduationCap, NotebookPen, CalendarDays, Settings, LogOut, ListTodo,
-  Sun, Moon, Menu, X, Search, Shield, ListChecks,
+  Sun, Moon, Menu, X, Search, Shield, ListChecks, FileQuestion,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,7 @@ const nav = [
   { to: "/routine", label: "Routine", icon: ListTodo },
   { to: "/exams", label: "Exams", icon: GraduationCap },
   { to: "/exam-prep", label: "Exam Prep", icon: ListChecks },
+  { to: "/questions", label: "Question Bank", icon: FileQuestion },
   { to: "/notes", label: "Notes", icon: NotebookPen },
   { to: "/calendar", label: "Calendar", icon: CalendarDays },
   { to: "/settings", label: "Settings", icon: Settings },

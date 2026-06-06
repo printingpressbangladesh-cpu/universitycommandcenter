@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAssignments } from "@/lib/assignmentsStore";
 import { useCourses } from "@/lib/coursesStore";
 import { useSemester } from "@/lib/semesterStore";
-import type { Assignment } from "@/lib/types";
+import type { Assignment, AssignmentAttachment } from "@/lib/types";
 import { CourseSelect } from "@/components/CourseSelect";
-import { Search, Plus, Award, Edit2, Trash2 } from "lucide-react";
+import { Search, Plus, Award, Edit2, Trash2, Paperclip, FileText, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +17,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/auth";
+import { getSupabase } from "@/lib/supabase/client";
+import { listAttachments, uploadAttachment, deleteAttachment, getAttachmentDownloadUrl } from "@/lib/supabase/attachmentsApi";
 
 export const Route = createFileRoute("/_app/assignments")({
   component: AssignmentsPage,
@@ -30,6 +33,7 @@ const columns: { id: Assignment["status"]; title: string; tone: string }[] = [
 ];
 
 function AssignmentsPage() {
+  const { user } = useAuth();
   const { courses } = useCourses();
   const { assignments: items, setAssignments: setItems, addAssignment, updateAssignment, removeAssignment } = useAssignments();
   const { syncToGoogle } = useSemester();
@@ -43,6 +47,112 @@ function AssignmentsPage() {
   const [priority, setPriority] = useState<Assignment["priority"]>("medium");
   const [roomNumber, setRoomNumber] = useState("");
   const [submissionType, setSubmissionType] = useState<"online" | "hard_copy">("online");
+
+  // Attachments State
+  const [attachmentsMap, setAttachmentsMap] = useState<Record<string, AssignmentAttachment[]>>({});
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<AssignmentAttachment[]>([]);
+  const [loadingAttachments, setLoadingAttachments] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const activeAssignment = useMemo(() => {
+    return items.find((x) => x.id === activeId) || null;
+  }, [items, activeId]);
+
+  const loadAllAttachments = async () => {
+    if (!user?.id) return;
+    try {
+      const { data, error } = await getSupabase()
+        .from("assignment_attachments")
+        .select("*")
+        .eq("user_id", user.id);
+      if (error) throw error;
+
+      const map: Record<string, AssignmentAttachment[]> = {};
+      (data ?? []).forEach((row) => {
+        const att: AssignmentAttachment = {
+          id: row.id,
+          userId: row.user_id,
+          assignmentId: row.assignment_id,
+          fileName: row.file_name,
+          filePath: row.file_path,
+          fileSize: row.file_size,
+          mimeType: row.mime_type,
+          createdAt: row.created_at,
+        };
+        if (!map[att.assignmentId]) map[att.assignmentId] = [];
+        map[att.assignmentId].push(att);
+      });
+      setAttachmentsMap(map);
+    } catch (err) {
+      console.error("Failed to load all attachments:", err);
+    }
+  };
+
+  useEffect(() => {
+    void loadAllAttachments();
+  }, [user?.id, items]);
+
+  const loadAttachments = async (assignmentId: string) => {
+    setLoadingAttachments(true);
+    try {
+      const list = await listAttachments(assignmentId);
+      setAttachments(list);
+    } catch (err) {
+      toast.error("Failed to load attachments");
+    } finally {
+      setLoadingAttachments(false);
+    }
+  };
+
+  const handleOpenDetail = (id: string) => {
+    setActiveId(id);
+    void loadAttachments(id);
+  };
+
+  const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!activeId || !user?.id || !e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    setIsUploading(true);
+    try {
+      const uploaded = await uploadAttachment(user.id, activeId, file);
+      setAttachments((prev) => [...prev, uploaded]);
+      setAttachmentsMap((prev) => ({
+        ...prev,
+        [activeId]: [...(prev[activeId] || []), uploaded],
+      }));
+      toast.success("File uploaded successfully");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to upload file");
+    } finally {
+      setIsUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleDeleteFile = async (att: AssignmentAttachment) => {
+    if (!confirm("Are you sure you want to delete this file?")) return;
+    try {
+      await deleteAttachment(att);
+      setAttachments((prev) => prev.filter((x) => x.id !== att.id));
+      setAttachmentsMap((prev) => ({
+        ...prev,
+        [att.assignmentId]: (prev[att.assignmentId] || []).filter((x) => x.id !== att.id),
+      }));
+      toast.success("File deleted");
+    } catch (err) {
+      toast.error("Failed to delete file");
+    }
+  };
+
+  const handleDownloadFile = async (att: AssignmentAttachment) => {
+    try {
+      const url = await getAttachmentDownloadUrl(att.filePath);
+      window.open(url, "_blank");
+    } catch (err) {
+      toast.error("Failed to generate download URL");
+    }
+  };
 
   const syncAssignmentsEmail = async () => {
     try {
@@ -257,7 +367,8 @@ function AssignmentsPage() {
                   key={a.id}
                   draggable
                   onDragStart={() => setDragId(a.id)}
-                  className="cursor-grab rounded-2xl border border-border/60 bg-card/60 p-3 backdrop-blur-md transition active:cursor-grabbing hover-lift"
+                  onClick={() => handleOpenDetail(a.id)}
+                  className="cursor-pointer rounded-2xl border border-border/60 bg-card/60 p-3 backdrop-blur-md transition active:cursor-grabbing hover-lift"
                 >
                   <div className="flex items-center gap-2">
                     <span className="rounded-md bg-secondary px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -293,12 +404,21 @@ function AssignmentsPage() {
                     </div>
                   </div>
                   <h4 className="mt-2 text-sm font-medium leading-snug">{a.title}</h4>
-                  {(a.roomNumber || a.submissionType) && (
-                    <div className="mt-1 flex flex-wrap gap-x-2 text-[10px] text-muted-foreground">
+                  {(a.roomNumber || a.submissionType || attachmentsMap[a.id]?.length > 0) && (
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[10px] text-muted-foreground">
                       {a.roomNumber && <span>Room: {a.roomNumber}</span>}
                       {a.roomNumber && a.submissionType && <span>·</span>}
                       {a.submissionType && (
                         <span>{a.submissionType === "online" ? "Online" : "Hard copy"}</span>
+                      )}
+                      {attachmentsMap[a.id]?.length > 0 && (
+                        <>
+                          {(a.roomNumber || a.submissionType) && <span>·</span>}
+                          <span className="inline-flex items-center gap-0.5 text-primary font-semibold">
+                            <Paperclip className="h-3 w-3" />
+                            {attachmentsMap[a.id].length}
+                          </span>
+                        </>
                       )}
                     </div>
                   )}
@@ -386,7 +506,10 @@ function AssignmentsPage() {
                       ) : (
                         <button
                           type="button"
-                          onClick={() => startMarking(a)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startMarking(a);
+                          }}
                           className="w-full rounded-lg border border-dashed border-border/60 py-1.5 text-[11px] text-muted-foreground hover:border-primary/40 hover:text-primary transition"
                         >
                           + Add mark
@@ -400,6 +523,171 @@ function AssignmentsPage() {
           </div>
         ))}
       </div>
+
+      {/* Assignment Detail Dialog */}
+      <Dialog open={!!activeId} onOpenChange={(o) => !o && setActiveId(null)}>
+        <DialogContent className="glass-strong max-w-md rounded-3xl border-border/60">
+          {activeAssignment && (
+            <div className="space-y-4">
+              <DialogHeader>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {activeAssignment.course}
+                  </span>
+                  <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                    activeAssignment.priority === "high"
+                      ? "bg-destructive/20 text-destructive"
+                      : activeAssignment.priority === "medium"
+                        ? "bg-[color:var(--warning)]/20 text-[color:var(--warning)]"
+                        : "bg-[color:var(--success)]/20 text-[color:var(--success)]"
+                  }`}>
+                    {activeAssignment.priority}
+                  </span>
+                </div>
+                <DialogTitle className="text-xl font-bold mt-2 text-foreground">{activeAssignment.title}</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-3 text-sm text-muted-foreground border-y border-border/40 py-3">
+                <div className="flex justify-between">
+                  <span>Due Date:</span>
+                  <strong className="text-foreground">
+                    {new Date(activeAssignment.due).toLocaleDateString(undefined, {
+                      weekday: "long",
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric"
+                    })}
+                  </strong>
+                </div>
+                {activeAssignment.roomNumber && (
+                  <div className="flex justify-between">
+                    <span>Room:</span>
+                    <strong className="text-foreground">{activeAssignment.roomNumber}</strong>
+                  </div>
+                )}
+                {activeAssignment.submissionType && (
+                  <div className="flex justify-between">
+                    <span>Submission:</span>
+                    <strong className="text-foreground uppercase">{activeAssignment.submissionType.replace("_", " ")}</strong>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span>Status:</span>
+                  <strong className="text-foreground uppercase">{activeAssignment.status.replace("_", " ")}</strong>
+                </div>
+              </div>
+
+              {/* Progress Slider */}
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs font-medium">
+                  <span>Completion Progress</span>
+                  <span>{activeAssignment.progress}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={activeAssignment.progress}
+                  onChange={(e) => {
+                    const progress = Number(e.target.value);
+                    updateAssignment(activeAssignment.id, { 
+                      progress,
+                      status: progress === 100 ? "done" : activeAssignment.status === "done" ? "in_progress" : activeAssignment.status
+                    });
+                  }}
+                  className="w-full accent-primary"
+                />
+              </div>
+
+              {/* Attachments Section */}
+              <div className="space-y-3 pt-2">
+                <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                  <Paperclip className="h-4 w-4 text-muted-foreground" />
+                  Attachments ({attachments.length})
+                </h4>
+
+                {loadingAttachments ? (
+                  <div className="flex justify-center py-6">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  <>
+                    {attachments.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border/40 rounded-xl bg-secondary/10">
+                        No attachments uploaded yet. Supporting PDF, Word, PPTX, and Images.
+                      </p>
+                    ) : (
+                      <ul className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                        {attachments.map((att) => (
+                          <li key={att.id} className="rounded-xl border border-border/60 bg-secondary/20 p-2 flex items-center justify-between gap-3 text-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FileText className="h-4 w-4 text-primary shrink-0" />
+                              <div className="truncate">
+                                <span className="font-medium text-foreground block truncate">{att.fileName}</span>
+                                <span className="text-[10px] text-muted-foreground">{(att.fileSize / 1024 / 1024).toFixed(2)} MB</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
+                                onClick={() => handleDownloadFile(att)}
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                onClick={() => handleDeleteFile(att)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {/* File Upload Input */}
+                    <div className="relative">
+                      <input
+                        type="file"
+                        id="assignment-file-upload"
+                        className="hidden"
+                        onChange={handleUploadFile}
+                        disabled={isUploading}
+                        accept=".pdf,.docx,.pptx,image/*"
+                      />
+                      <Label
+                        htmlFor="assignment-file-upload"
+                        className={`flex items-center justify-center gap-2 border border-dashed border-border/60 hover:border-primary/50 bg-secondary/30 rounded-xl p-3 cursor-pointer text-xs font-semibold text-primary transition-colors ${
+                          isUploading ? "pointer-events-none opacity-50" : ""
+                        }`}
+                      >
+                        {isUploading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Uploading...
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="h-4 w-4" />
+                            Upload Attachment
+                          </>
+                        )}
+                      </Label>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

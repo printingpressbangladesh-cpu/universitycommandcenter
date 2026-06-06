@@ -12,6 +12,7 @@ export type Course = {
   progress: number;
   weakTopics: string[];
   color: string;
+  targetAttendance?: number;
 };
 
 export type Assignment = {
@@ -80,6 +81,8 @@ export type SemesterPeriod = {
   startDate: string; // YYYY-MM-DD
   endDate: string;
   label?: string;
+  targetWeeklyStudyMinutes?: number;
+  lastClassDate?: string; // YYYY-MM-DD (custom override, optional)
 };
 
 export type Holiday = {
@@ -128,3 +131,35 @@ export type CalendarEvent = {
   color: string;
   kind: "class" | "assignment" | "exam" | "holiday" | "other";
 };
+
+export type AssignmentAttachment = {
+  id: string;
+  userId: string;
+  assignmentId: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  mimeType: string;
+  createdAt: string;
+};
+
+export type QuestionBankItem = {
+  id: string;
+  userId: string;
+  courseCode: string;
+  courseName: string;
+  semesterLabel?: string;
+  examType: "midterm" | "final" | "quiz" | "practice";
+  year: number;
+  title: string;
+  description?: string;
+  filePath: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  tags: string[];
+  isPublic: boolean;
+  downloadsCount: number;
+  createdAt: string;
+};
+

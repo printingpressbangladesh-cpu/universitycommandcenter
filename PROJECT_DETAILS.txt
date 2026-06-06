@@ -1,0 +1,792 @@
+================================================================================
+   UNIVERSITY COMMAND CENTER — COMPLETE PROJECT DOCUMENTATION
+   Written: June 2026
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+ 1. Project Overview
+ 2. Tech Stack
+ 3. Project Folder Structure
+ 4. Features & Pages
+ 5. Database (Supabase)
+ 6. Authentication & User Roles
+ 7. Environment Variables
+ 8. Google Apps Script (Email System)
+ 9. Email Trigger Setup (Google Apps Script)
+10. Automatic Sync System (How it Works)
+11. Admin Panel
+12. Deployment Guide (Vercel)
+13. Local Development
+14. Key Source Files
+15. Recent Changes & Updates
+16. Troubleshooting
+
+
+================================================================================
+ 1. PROJECT OVERVIEW
+================================================================================
+
+Name        : University Command Center (UCC)
+Purpose     : A comprehensive academic management portal for university students
+              and administrators. Helps students track courses, attendance,
+              routines, assignments, exams, notes, and study sessions.
+              Sends automated daily email digests with tomorrow's schedule,
+              assignment deadlines, and exam reminders.
+
+Built for   : Primarily Bangladesh university students (Asia/Dhaka timezone)
+Deployed on : Vercel (hosting) + Supabase (database & auth)
+Backend     : Google Apps Script (email automation & triggers)
+
+
+================================================================================
+ 2. TECH STACK
+================================================================================
+
+FRONTEND
+--------
+  Framework     : React 19 + TanStack Start (SSR)
+  Router        : TanStack Router v1
+  Language      : TypeScript 5.8
+  Styling       : Tailwind CSS v4 + custom CSS (glass morphism, dark/light mode)
+  UI Components : Radix UI primitives + shadcn/ui components
+  Icons         : Lucide React
+  Charts        : Recharts
+  Forms         : React Hook Form + Zod
+  Toasts        : Sonner
+  Date Utils    : date-fns
+  Build Tool    : Vite 7
+
+BACKEND / DATABASE
+------------------
+  Database      : Supabase (PostgreSQL)
+  Auth          : Supabase Auth (email/password)
+  Storage       : Supabase Postgres (all user data synced to cloud)
+
+EMAIL AUTOMATION
+----------------
+  Platform      : Google Apps Script
+  Triggers      : Time-driven daily triggers (run at set hours)
+  Data Store    : Script Properties (stores each user's synced data)
+
+HOSTING
+-------
+  Production    : Vercel (SSR via Nitro adapter)
+  Alt option    : Cloudflare Pages (wrangler.jsonc included)
+
+
+================================================================================
+ 3. PROJECT FOLDER STRUCTURE
+================================================================================
+
+semester-ascend-main/
+│
+├── .env                          ← Your local environment variables (secret)
+├── .env.example                  ← Template showing all required env vars
+├── DEPLOY.md                     ← Original deployment guide
+├── vercel.json                   ← Vercel deployment config
+├── wrangler.jsonc                ← Cloudflare Pages config (alternative)
+├── package.json                  ← Dependencies & npm scripts
+├── vite.config.ts                ← Vite + Nitro + TanStack build config
+├── tsconfig.json                 ← TypeScript config
+│
+├── google-apps-script/
+│   └── email-otp.gs              ← THE ENTIRE EMAIL BACKEND (Google Apps Script)
+│
+├── supabase/
+│   ├── config.toml
+│   ├── schema_complete.sql       ← Full DB schema in one file
+│   └── migrations/
+│       ├── 001_initial_schema.sql
+│       └── 002_full_schema.sql
+│
+└── src/
+    ├── styles.css                ← Global CSS, design tokens, dark/light mode
+    ├── router.tsx
+    ├── start.ts
+    ├── server.ts
+    ├── routeTree.gen.ts          ← Auto-generated route tree
+    │
+    ├── components/
+    │   ├── ChangePasswordForm.tsx
+    │   ├── CourseSelect.tsx
+    │   ├── DocsEditor.tsx        ← Rich text notes editor
+    │   └── ui/                   ← shadcn/ui component library
+    │
+    ├── lib/
+    │   ├── auth.tsx              ← Auth context (login, signup, signout)
+    │   ├── semesterStore.tsx     ← Central data store (semester, holidays,
+    │   │                             attendance, sync to Google)
+    │   ├── coursesStore.tsx      ← Courses CRUD
+    │   ├── assignmentsStore.tsx  ← Assignments CRUD
+    │   ├── examsStore.tsx        ← Exams CRUD
+    │   ├── notesStore.tsx        ← Notes CRUD
+    │   ├── routineStore.tsx      ← Weekly routine blocks
+    │   ├── studyStore.tsx        ← Study timer sessions
+    │   ├── notificationsApi.ts   ← syncNotifications() — calls Google Script
+    │   ├── systemConfig.ts       ← Admin email config (enabled, adminFormUrl)
+    │   ├── scheduleUtils.ts      ← Date/time helpers
+    │   ├── userRoles.ts          ← Role definitions (admin, student, support)
+    │   ├── types.ts              ← Shared TypeScript types
+    │   ├── theme.tsx             ← Dark/light mode
+    │   ├── events.ts             ← Event emitter for data changes
+    │   ├── admin.ts              ← Admin credentials helper
+    │   ├── usersAdmin.ts         ← Student & team member management
+    │   └── db/
+    │       ├── index.ts          ← Dexie (local IndexedDB, legacy)
+    │       ├── localAuth.ts      ← Local auth helpers
+    │       └── resetUserData.ts  ← Wipe all user data
+    │
+    └── routes/
+        ├── __root.tsx            ← Root layout (nav, providers, sidebar)
+        ├── index.tsx             ← Redirects to /dashboard
+        ├── login.tsx             ← Login / Sign-up page
+        ├── _app.tsx              ← App shell (authenticated layout)
+        └── _app/
+            ├── dashboard.tsx     ← Home dashboard
+            ├── routine.tsx       ← Weekly routine maker
+            ├── courses.tsx       ← Courses listing shell
+            ├── courses.index.tsx ← Courses grid
+            ├── courses.$courseId.tsx ← Single course detail
+            ├── attendance.tsx    ← Attendance tracker
+            ├── assignments.tsx   ← Kanban assignments board
+            ├── exams.tsx         ← Exam schedule & marks
+            ├── exam-prep.tsx     ← Exam preparation planner
+            ├── calendar.tsx      ← Full calendar view
+            ├── notes.tsx         ← Notes shell
+            ├── notes.index.tsx   ← Notes list
+            ├── notes.$noteId.tsx ← Note editor
+            ├── study.tsx         ← Study timer (Pomodoro)
+            ├── settings.tsx      ← User settings
+            └── admin.tsx         ← Admin panel
+
+
+================================================================================
+ 4. FEATURES & PAGES
+================================================================================
+
+DASHBOARD (/dashboard)
+  - Overview cards: attendance %, upcoming exams, pending assignments
+  - Study time this week
+  - Quick links to all sections
+
+ROUTINE MAKER (/routine)
+  - Add weekly class blocks (day, time, course, room)
+  - Set semester start/end dates
+  - Add holidays (single day or date range)
+  - Download routine as CSV, ICS (calendar), or Print/PDF
+  - Auto-syncs to email system when notifications are enabled
+
+COURSES (/courses)
+  - Add/edit courses with name, code, credits, color
+  - Course detail page with attendance stats and grade tracker
+  - Per-course exam date setting
+
+ATTENDANCE (/attendance)
+  - Mark present/absent for each class session
+  - Excuse system for past-date corrections
+  - Cancel class feature
+  - Live attendance % per course
+  - Last attendance date tracking (used for 7-day absence alert)
+
+ASSIGNMENTS (/assignments)
+  - Kanban board: To Do / In Progress / Completed
+  - Drag and drop to change status
+  - Add assignments with: title, course, due date, priority, room, submission type
+  - Record marks for completed assignments
+  - Auto-syncs to email system on any change
+
+EXAMS (/exams)
+  - Schedule upcoming exams with date, title, location, max mark
+  - Countdown to next exam
+  - Mark exams as done and record scores
+  - Filter by subject
+  - Auto-syncs to email system on any change
+
+EXAM PREP (/exam-prep)
+  - Revision planner
+  - Topic checklist per exam
+
+CALENDAR (/calendar)
+  - Monthly view showing classes, exams, and assignments
+  - Holiday highlighting
+
+NOTES (/notes)
+  - Rich text note editor (DocsEditor component)
+  - Per-note titles and content
+  - Course-linked notes
+
+STUDY TIMER (/study)
+  - Pomodoro-style study session timer
+  - Session history tracking
+  - Weekly study minutes summary
+
+SETTINGS (/settings)
+  - Profile info display
+  - Change password
+  - Dark / Light mode toggle
+  - Reset all data option
+  - Email reminders info (shows admin instructions)
+  - Admin panel link (admin only)
+
+ADMIN PANEL (/admin)
+  - Tabs: Students | Team | Email
+  - Students tab: view all registered students with course & attendance data,
+    remove student accounts
+  - Team tab: add/remove team members (student support, operations, academic,
+    technical roles)
+  - Email tab: set Google Form URL, enable/disable email reminders, Save & Sync
+
+
+================================================================================
+ 5. DATABASE (SUPABASE)
+================================================================================
+
+All tables are in the `public` schema with Row Level Security (RLS) enabled.
+
+TABLE: profiles
+  - id (uuid, FK to auth.users)
+  - email (text)
+  - full_name (text)
+  - username (text, unique)
+  - role (text) — 'admin' | 'student' | 'student_support' | 'technical' |
+                   'operations' | 'academic_staff'
+  - created_at (timestamptz)
+
+TABLE: courses
+  - id (uuid)
+  - user_id (uuid, FK profiles)
+  - name, code, credits (text/int)
+  - color (text, hex)
+  - teacher (text)
+  - attendance (int, %)
+  - total_classes, attended (int)
+  - exam_date (text)
+
+TABLE: routines
+  - id (uuid)
+  - user_id (uuid)
+  - day (text) — 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun'
+  - start, end (text, HH:MM)
+  - title (text)
+  - location (text)
+  - course_id (uuid)
+  - course_code (text)
+  - is_class (bool)
+
+TABLE: attendance_logs
+  - id (uuid)
+  - user_id (uuid)
+  - course_id (uuid)
+  - routine_block_id (uuid, nullable)
+  - date (text, YYYY-MM-DD)
+  - present (bool)
+  - cancelled (bool)
+  - excuse (text)
+
+TABLE: semester_periods
+  - id (uuid)
+  - user_id (uuid, unique)
+  - start_date, end_date (text)
+  - label (text)
+
+TABLE: holidays
+  - id (uuid)
+  - user_id (uuid)
+  - label (text)
+  - start_date, end_date (text)
+  - type ('single' | 'range')
+
+TABLE: assignments
+  - id (uuid)
+  - user_id (uuid)
+  - title, course (text)
+  - due (timestamptz)
+  - priority ('low' | 'medium' | 'high')
+  - status ('todo' | 'in_progress' | 'done')
+  - progress (int, 0–100)
+  - mark, max_mark (numeric, nullable)
+  - room_number (text)
+  - submission_type ('online' | 'hard_copy')
+
+TABLE: exams
+  - id (uuid)
+  - user_id (uuid)
+  - course_id (uuid)
+  - title (text)
+  - date (text, YYYY-MM-DD)
+  - status ('upcoming' | 'done')
+  - mark, max_mark (numeric, nullable)
+  - location (text)
+  - created_at (timestamptz)
+
+TABLE: notes
+  - id (uuid)
+  - user_id (uuid)
+  - title (text)
+  - content (text, rich HTML)
+  - created_at, updated_at (timestamptz)
+
+TABLE: study_sessions
+  - id (uuid)
+  - user_id (uuid)
+  - duration_minutes (int)
+  - created_at (timestamptz)
+
+TABLE: notification_prefs
+  - id (uuid)
+  - user_id (uuid, unique)
+  - email (text)
+  - enabled (bool)
+  - admin_form_url (text)
+  - last_synced_at (timestamptz)
+
+TABLE: system_config
+  - id (uuid, single row)
+  - admin_form_url (text)
+  - enabled (bool) — controls email reminders for ALL students
+  - last_synced_at (timestamptz)
+
+
+================================================================================
+ 6. AUTHENTICATION & USER ROLES
+================================================================================
+
+Login method   : Email + Password via Supabase Auth
+Sign-up        : Email confirmation is DISABLED (immediate access)
+
+DEFAULT ADMIN ACCOUNT
+  Email    : universitycommandcenter@gmail.com
+  Username : ucc_admin
+  Password : Set via VITE_ADMIN_PASSWORD env var
+
+Role is stored in the `profiles` table. On login, user metadata is read to
+determine if the user is admin. Admin email is set via VITE_ADMIN_EMAIL.
+
+ROLES
+  admin           — Full access, admin panel, email settings
+  student         — Standard student access (default for sign-up)
+  student_support — Team member role
+  technical       — Team member role
+  operations      — Team member role
+  academic_staff  — Team member role
+
+Admin can add team members (non-admin staff) from the Admin panel → Team tab.
+Admin can remove student accounts permanently from the Admin panel → Students tab.
+
+
+================================================================================
+ 7. ENVIRONMENT VARIABLES
+================================================================================
+
+Copy .env.example → .env and fill in values.
+
+REQUIRED:
+  VITE_SUPABASE_URL          Supabase project URL
+                             e.g. https://abcdefgh.supabase.co
+
+  VITE_SUPABASE_ANON_KEY     Supabase anon/public key (NOT service_role key)
+                             Found in: Supabase → Settings → API
+
+OPTIONAL (for email system):
+  VITE_OTP_API_URL           Google Apps Script web app URL
+                             e.g. https://script.google.com/macros/s/XXX/exec
+                             Used for: email reminders sync
+
+  VITE_ADMIN_FORM_URL        Google Form URL for student absence/support form
+                             Used in: 7-day absence emails, health check emails
+
+ADMIN ACCOUNT DEFAULTS:
+  VITE_ADMIN_EMAIL           Default admin email (auto-roles this on signup)
+  VITE_ADMIN_USERNAME        Default admin username
+  VITE_ADMIN_PASSWORD        Default admin password (change this!)
+  VITE_ADMIN_NAME            Admin display name
+
+NOTE: All VITE_ variables are public (embedded in the frontend bundle).
+      Never put secret keys or service_role keys as VITE_ variables.
+
+
+================================================================================
+ 8. GOOGLE APPS SCRIPT (EMAIL SYSTEM)
+================================================================================
+
+File    : google-apps-script/email-otp.gs
+Platform: Google Apps Script (script.google.com)
+Deploy  : Web App — Execute as Me — Anyone can access
+
+The script does two things:
+  A) Receives POST requests from the app to store user data
+  B) Runs scheduled triggers to send automated emails
+
+HOW DATA GETS STORED
+  When a student logs in (or changes data), the app calls:
+    POST { action: "sync", email: "...", data: { routine, assignments, exams... } }
+  The script stores this in Google Script Properties under key "sync_<email>"
+
+EMAIL TYPES SENT
+  1. DAILY DIGEST (sendDailyDigests — runs 6pm–7pm daily)
+     - Tomorrow's class schedule from the routine
+     - Assignments due tomorrow or in 2 days
+     - Exams tomorrow or in 2 days
+     - Fun message if no classes tomorrow
+     - Holiday message if tomorrow is a holiday
+
+  2. 7-DAY ABSENCE ALERT (checkSevenDayAbsence — runs 9am–10am daily)
+     - Sends if student hasn't logged attendance for 7+ days
+     - Includes link to the admin support Google Form
+
+  3. EXAM MARK REMINDER (checkExamMarkReminders — runs 10am–11am daily)
+     - Sends if student marked an exam as "done" but hasn't entered a mark yet
+
+  4. MONTHLY HEALTH CHECK (inside sendDailyDigests — runs on the 5th of each month)
+     - Wellness reminder with health tips
+     - Link to admin support form
+
+SCRIPT PROPERTIES STORED PER USER
+  email, semester, holidays, routine, courses, assignments, examDates, exams,
+  lastAttendanceDate, notificationsEnabled, adminFormUrl, lastSyncedAt,
+  lastDigestDate, lastAbsenceEmailAt, lastMarkReminderDate, lastHealthEmailMonth
+
+
+================================================================================
+ 9. EMAIL TRIGGER SETUP (GOOGLE APPS SCRIPT)
+================================================================================
+
+STEP 1: Set timezone to Asia/Dhaka
+  - In Google Apps Script → ⚙️ Project Settings
+  - Change Time zone to: (GMT+06:00) Asia/Dhaka
+  - Save
+
+STEP 2: Delete all old triggers
+  - Click ⏰ Triggers icon (left sidebar)
+  - Delete every existing trigger
+
+STEP 3: Create 3 new triggers
+
+  Trigger 1 — sendDailyDigests
+    Function      : sendDailyDigests
+    Event source  : Time-driven
+    Type          : Day timer
+    Time of day   : 6pm to 7pm
+
+  Trigger 2 — checkSevenDayAbsence
+    Function      : checkSevenDayAbsence
+    Event source  : Time-driven
+    Type          : Day timer
+    Time of day   : 9am to 10am
+
+  Trigger 3 — checkExamMarkReminders
+    Function      : checkExamMarkReminders
+    Event source  : Time-driven
+    Type          : Day timer
+    Time of day   : 10am to 11am
+
+STEP 4: Deploy as Web App
+  - Deploy → Manage Deployments → New deployment
+  - Type: Web app
+  - Execute as: Me
+  - Who has access: Anyone
+  - Copy the /exec URL → put in VITE_OTP_API_URL in .env and Vercel
+
+IMPORTANT: Every time you edit the .gs file and save, you must create a
+NEW deployment version. The URL can stay the same if you update an existing
+deployment (not create a new one). Use "New version" in Manage Deployments.
+
+STEP 5: Test manually
+  - Select sendDailyDigests from the function dropdown
+  - Click ▶ Run
+  - Check Gmail inbox within 30 seconds
+  - If email arrives → triggers will also work automatically
+
+
+================================================================================
+10. AUTOMATIC SYNC SYSTEM (HOW IT WORKS)
+================================================================================
+
+BEFORE (manual):
+  Students had to click a "Sync email reminders" button on the Routine page
+  and an "Sync exam emails" button on the Exams page. Easy to forget.
+
+AFTER (automatic — current version):
+  Sync happens automatically in these situations:
+
+  A) ON LOGIN (for all accounts, including existing users)
+     - When the app loads and user data is fetched from Supabase
+     - If admin has enabled email reminders (system_config.enabled = true)
+     - Fires once per session using a useRef flag (autoSyncedRef)
+     - Shows a small "✓ Email reminders synced" toast for 2.5 seconds
+     - Silent on failure (doesn't interrupt the user)
+
+  B) ON DATA CHANGE (silent background sync)
+     - When a routine block is added (in routine.tsx)
+     - When an exam is added, marked done, or mark is saved (in exams.tsx)
+     - When an assignment is created, moved, or mark is saved (in assignments.tsx)
+     - These fail silently (no error shown to user)
+
+  C) ADMIN MANUAL SYNC (admin.tsx)
+     - Admin can still click "Save & sync" in Admin → Email tab
+     - This saves system config AND triggers a full sync
+     - Useful after enabling/disabling reminders
+
+HOW SYNC WORKS (syncToGoogle in semesterStore.tsx)
+  1. Checks if system email config is enabled
+  2. Fetches all data: routine, courses, assignments, exam dates, exams
+  3. Calls syncNotifications() in notificationsApi.ts
+  4. Posts to Google Apps Script: { action: "sync", email, data: {...} }
+  5. Google Script stores everything in Script Properties
+  6. Updates lastSyncedAt in both system_config and notification_prefs
+
+
+================================================================================
+11. ADMIN PANEL
+================================================================================
+
+Access    : /admin (admin role only)
+Nav       : Settings page → "Open admin panel" button
+
+STUDENTS TAB
+  - Lists all registered student accounts
+  - Shows: full name, username, email, course count
+  - Expand each student to see: courses, attendance %, assignment counts,
+    exam counts, study time this week
+  - "Remove Student Account" — permanently deletes student and ALL their data
+
+TEAM TAB
+  - Lists non-admin team members
+  - "Add team member" form: full name, username, email, role, password
+  - Team roles: Student Support, Technical, Operations, Academic Staff
+  - "Remove from team" — demotes back to student role
+
+EMAIL TAB (most important)
+  - Admin account info and password change
+  - Admin/support Google Form URL input
+  - "Enable scheduled emails for all students" checkbox
+  - SAVE — saves config only
+  - SAVE & SYNC — saves config AND triggers immediate sync with Google Script
+  - Shows "Last synced: [timestamp]"
+
+NOTE: Email reminders only work when:
+  1. Admin has checked "Enable scheduled emails for all students"
+  2. VITE_OTP_API_URL is set to a valid Google Apps Script URL
+  3. At least one trigger exists in Google Apps Script
+
+
+================================================================================
+12. DEPLOYMENT GUIDE (VERCEL)
+================================================================================
+
+PREREQUISITES
+  - Node.js installed
+  - GitHub account
+  - Vercel account
+  - Supabase account
+
+STEP 1: Set up Supabase
+  a) Create new project at supabase.com/dashboard
+  b) SQL Editor → run supabase/migrations/001_initial_schema.sql
+  c) SQL Editor → run supabase/migrations/002_full_schema.sql
+  d) Authentication → Providers → Email → DISABLE "Confirm email"
+  e) Authentication → URL Configuration → add your Vercel URL as Site URL
+  f) Settings → API → copy Project URL and anon public key
+
+STEP 2: Push to GitHub
+  git init
+  git add .
+  git commit -m "Initial commit"
+  git branch -M main
+  git remote add origin https://github.com/YOUR_USER/YOUR_REPO.git
+  git push -u origin main
+
+STEP 3: Deploy on Vercel
+  a) vercel.com/new → import GitHub repo
+  b) Framework preset: OTHER (NOT Vite — that causes 404 errors)
+  c) Build command: npm run build
+  d) Output directory: (leave empty)
+  e) Install command: npm install
+
+STEP 4: Set environment variables in Vercel
+  Settings → Environment Variables → add all VITE_ variables listed in
+  section 7 of this document.
+
+STEP 5: Redeploy
+  After adding env vars → Deployments → Redeploy (without cache)
+
+STEP 6: Create admin account
+  a) Open your Vercel URL
+  b) Click Sign up
+  c) Use email: universitycommandcenter@gmail.com
+  d) Set username: ucc_admin, any password
+  e) This email is auto-assigned admin role
+
+STEP 7: Set up Google Apps Script (see section 9)
+
+STEP 8: Add admin form and enable reminders
+  a) Log in as admin → Admin panel → Email tab
+  b) Paste Google Form URL
+  c) Check "Enable scheduled emails for all students"
+  d) Click "Save & sync"
+
+
+================================================================================
+13. LOCAL DEVELOPMENT
+================================================================================
+
+Install dependencies:
+  npm install
+
+Create .env file:
+  Copy .env.example to .env
+  Fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
+
+Run dev server:
+  npm run dev
+  Opens at http://localhost:5173
+
+Build for production:
+  npm run build
+
+Preview production build:
+  npm run preview
+
+Lint:
+  npm run lint
+
+Format:
+  npm run format
+
+
+================================================================================
+14. KEY SOURCE FILES
+================================================================================
+
+MOST IMPORTANT FILES TO UNDERSTAND THE PROJECT:
+
+  src/lib/semesterStore.tsx
+    → Central context provider. Manages semester, holidays, attendance,
+      notification prefs, and the syncToGoogle function.
+      Also contains the auto-sync-on-login logic.
+
+  src/lib/notificationsApi.ts
+    → syncNotifications() — the function that POST-calls Google Apps Script
+      with all the user's data.
+
+  src/lib/systemConfig.ts
+    → getSystemEmailConfig() / saveSystemEmailConfig()
+    → Reads/writes the single-row system_config table in Supabase.
+
+  google-apps-script/email-otp.gs
+    → The entire email backend. Copy-paste this into Google Apps Script.
+    → Functions: doPost, syncUser, sendDailyDigests, checkSevenDayAbsence,
+      checkExamMarkReminders, sendHealthEmail
+
+  src/routes/_app/admin.tsx
+    → Admin panel with student list, team management, and email config.
+
+  src/routes/_app/routine.tsx
+    → Weekly routine builder. No manual sync button (auto-sync only).
+
+  src/routes/_app/exams.tsx
+    → Exam scheduling and marks. No manual sync button (auto-sync only).
+
+  src/routes/_app/assignments.tsx
+    → Kanban assignments board with auto-sync on data changes.
+
+  supabase/schema_complete.sql
+    → Full database schema. Run this if you need to set up the DB from scratch.
+
+
+================================================================================
+15. RECENT CHANGES & UPDATES (June 2026)
+================================================================================
+
+CHANGE 1: Removed manual sync buttons
+  Files changed: routine.tsx, exams.tsx
+  - Removed "Sync email reminders" button from Routine page header
+  - Removed "Sync exam emails" button from Exams page header
+  - Background auto-sync still fires after data changes (silently)
+
+CHANGE 2: Auto-sync on login
+  File changed: semesterStore.tsx
+  - Added useRef (autoSyncedRef) to track if sync has fired this session
+  - Added useEffect that fires once after userId, prefs, and semester are loaded
+  - Checks if system email config is enabled before syncing
+  - Shows "✓ Email reminders synced" toast (2500ms) on success
+  - Fails silently — no error shown to user
+  - Works for ALL accounts including existing/previous account creators
+
+CHANGE 3: Silent auto-sync in exams
+  File changed: exams.tsx
+  - syncExamsEmail() no longer shows "Exam schedule synced" toast
+  - Errors caught silently so they don't interrupt the user
+
+CHANGE 4: Updated settings description
+  File changed: settings.tsx
+  - "Email Reminders" section now says sync is automatic on login
+  - Removed reference to manual sync buttons (they no longer exist)
+
+CHANGE 5: Updated routine hint text
+  File changed: routine.tsx
+  - Hint text updated to say "Email reminders sync automatically when
+    enabled by your administrator" instead of the old manual sync instruction
+
+
+================================================================================
+16. TROUBLESHOOTING
+================================================================================
+
+PROBLEM: 404 NOT_FOUND on every page after Vercel deploy
+FIX: You chose the wrong framework preset. Must use "Other" (not Vite).
+     Output directory must be empty. Redeploy without build cache.
+
+PROBLEM: "Supabase is not configured" error
+FIX: Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to Vercel env vars
+     and redeploy.
+
+PROBLEM: Sign-up says "email already exists"
+FIX: You already registered. Use Sign In instead.
+
+PROBLEM: Admin features not showing after sign-up
+FIX: Run in Supabase SQL Editor:
+     UPDATE public.profiles SET role = 'admin'
+     WHERE email = 'universitycommandcenter@gmail.com';
+     Then sign out and back in.
+
+PROBLEM: No daily emails arriving
+FIX 1: Go to Google Apps Script → Project Settings → set timezone to Asia/Dhaka
+FIX 2: Delete all old triggers, create 3 fresh ones (see section 9)
+FIX 3: Run sendDailyDigests manually (▶ Run) to test — check Gmail immediately
+FIX 4: Make sure admin has enabled email reminders in Admin panel → Email tab
+FIX 5: Make sure VITE_OTP_API_URL points to the latest deployed Web App URL
+
+PROBLEM: "✓ Email reminders synced" toast does not appear on login
+FIX 1: Admin has not enabled email reminders (Admin → Email → check the box)
+FIX 2: VITE_OTP_API_URL is missing or incorrect in .env / Vercel env vars
+FIX 3: Google Apps Script URL has changed — create new deployment, update URL
+
+PROBLEM: Trigger fires at wrong time (midnight instead of 6pm)
+FIX: Set project timezone to Asia/Dhaka in Google Apps Script Project Settings
+     Then delete old triggers and create new ones.
+
+PROBLEM: Build fails on Vercel
+FIX: Run npm install && npm run build locally first to identify the error.
+     Fix any TypeScript or lint errors before pushing.
+
+PROBLEM: Student data not appearing in emails
+FIX: Students must log in to the app at least once AFTER admin enables reminders.
+     The auto-sync on login sends their data to Google Script Properties.
+     Emails can only be sent to emails stored in Script Properties.
+
+PROBLEM: Email goes to spam
+FIX: The email is sent from your Google account (the Script owner account).
+     Ask students to add that Gmail address to their contacts.
+     Or move the email out of spam manually once.
+
+PROBLEM: "Email reminders are disabled" error in console
+FIX: Normal — means admin hasn't enabled reminders yet. No action needed.
+     The auto-sync catches this silently and skips.
+
+
+================================================================================
+END OF DOCUMENT
+University Command Center — Full Project Documentation
+================================================================================

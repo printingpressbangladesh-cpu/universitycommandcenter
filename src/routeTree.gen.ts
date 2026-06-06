@@ -15,6 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppStudyRouteImport } from './routes/_app/study'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppRoutineRouteImport } from './routes/_app/routine'
+import { Route as AppQuestionsRouteImport } from './routes/_app/questions'
 import { Route as AppNotesRouteImport } from './routes/_app/notes'
 import { Route as AppExamsRouteImport } from './routes/_app/exams'
 import { Route as AppExamPrepRouteImport } from './routes/_app/exam-prep'
@@ -56,6 +57,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
 const AppRoutineRoute = AppRoutineRouteImport.update({
   id: '/routine',
   path: '/routine',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppQuestionsRoute = AppQuestionsRouteImport.update({
+  id: '/questions',
+  path: '/questions',
   getParentRoute: () => AppRoute,
 } as any)
 const AppNotesRoute = AppNotesRouteImport.update({
@@ -136,6 +142,7 @@ export interface FileRoutesByFullPath {
   '/exam-prep': typeof AppExamPrepRoute
   '/exams': typeof AppExamsRoute
   '/notes': typeof AppNotesRouteWithChildren
+  '/questions': typeof AppQuestionsRoute
   '/routine': typeof AppRoutineRoute
   '/settings': typeof AppSettingsRoute
   '/study': typeof AppStudyRoute
@@ -154,6 +161,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AppDashboardRoute
   '/exam-prep': typeof AppExamPrepRoute
   '/exams': typeof AppExamsRoute
+  '/questions': typeof AppQuestionsRoute
   '/routine': typeof AppRoutineRoute
   '/settings': typeof AppSettingsRoute
   '/study': typeof AppStudyRoute
@@ -176,6 +184,7 @@ export interface FileRoutesById {
   '/_app/exam-prep': typeof AppExamPrepRoute
   '/_app/exams': typeof AppExamsRoute
   '/_app/notes': typeof AppNotesRouteWithChildren
+  '/_app/questions': typeof AppQuestionsRoute
   '/_app/routine': typeof AppRoutineRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/study': typeof AppStudyRoute
@@ -198,6 +207,7 @@ export interface FileRouteTypes {
     | '/exam-prep'
     | '/exams'
     | '/notes'
+    | '/questions'
     | '/routine'
     | '/settings'
     | '/study'
@@ -216,6 +226,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/exam-prep'
     | '/exams'
+    | '/questions'
     | '/routine'
     | '/settings'
     | '/study'
@@ -237,6 +248,7 @@ export interface FileRouteTypes {
     | '/_app/exam-prep'
     | '/_app/exams'
     | '/_app/notes'
+    | '/_app/questions'
     | '/_app/routine'
     | '/_app/settings'
     | '/_app/study'
@@ -294,6 +306,13 @@ declare module '@tanstack/react-router' {
       path: '/routine'
       fullPath: '/routine'
       preLoaderRoute: typeof AppRoutineRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/questions': {
+      id: '/_app/questions'
+      path: '/questions'
+      fullPath: '/questions'
+      preLoaderRoute: typeof AppQuestionsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/notes': {
@@ -428,6 +447,7 @@ interface AppRouteChildren {
   AppExamPrepRoute: typeof AppExamPrepRoute
   AppExamsRoute: typeof AppExamsRoute
   AppNotesRoute: typeof AppNotesRouteWithChildren
+  AppQuestionsRoute: typeof AppQuestionsRoute
   AppRoutineRoute: typeof AppRoutineRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppStudyRoute: typeof AppStudyRoute
@@ -443,6 +463,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppExamPrepRoute: AppExamPrepRoute,
   AppExamsRoute: AppExamsRoute,
   AppNotesRoute: AppNotesRouteWithChildren,
+  AppQuestionsRoute: AppQuestionsRoute,
   AppRoutineRoute: AppRoutineRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppStudyRoute: AppStudyRoute,

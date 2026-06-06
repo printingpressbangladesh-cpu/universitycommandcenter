@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRoutine, type RoutineBlock } from "@/lib/routineStore";
 import { useSemester } from "@/lib/semesterStore";
 import { useCourses } from "@/lib/coursesStore";
 import { useAuth } from "@/lib/auth";
-import { ROUTINE_DAYS } from "@/lib/scheduleUtils";
-import { Plus, Trash2, Download } from "lucide-react";
+import { dateKey, parseDateKey, ROUTINE_DAYS, todayKey } from "@/lib/scheduleUtils";
+import { Plus, Trash2, Download, Save, CalendarX, CheckCircle2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +23,46 @@ export const Route = createFileRoute("/_app/routine")({
   head: () => ({ meta: [{ title: "Routine · University Command Center" }] }),
 });
 
+// ─── Last Date of Class helper ──────────────────────────────────────────────
+const JS_WEEKDAY: Record<string, number> = {
+  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+};
+
+function computeLastClassDate(
+  endDate: string,
+  blocks: RoutineBlock[],
+  holidays: import("@/lib/types").Holiday[],
+): string | null {
+  if (!endDate || blocks.length === 0) return null;
+  // Weekday numbers that have at least one class block
+  const classDays = new Set(blocks.map((b) => JS_WEEKDAY[b.day]));
+  if (classDays.size === 0) return null;
+  // Build a Set of holiday date-keys
+  const holidayKeys = new Set<string>();
+  for (const h of holidays) {
+    const start = parseDateKey(h.startDate);
+    const end = h.endDate ? parseDateKey(h.endDate) : start;
+    const cur = new Date(start);
+    while (cur <= end) {
+      holidayKeys.add(dateKey(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+  // Walk backward from endDate
+  const end = parseDateKey(endDate);
+  const limit = new Date(end);
+  limit.setDate(limit.getDate() - 120); // don't search more than 120 days back
+  const cursor = new Date(end);
+  while (cursor >= limit) {
+    const dk = dateKey(cursor);
+    if (classDays.has(cursor.getDay()) && !holidayKeys.has(dk)) {
+      return dk;
+    }
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return null;
+}
+
 function RoutinePage() {
   const { user } = useAuth();
   const { courses } = useCourses();
@@ -30,11 +70,159 @@ function RoutinePage() {
   const { semester, holidays, setSemester, addHoliday, removeHoliday, syncToGoogle, prefs } =
     useSemester();
 
+  // ─── Local draft state for semester dates (explicit Save) ────────────────
+  const [draftStart, setDraftStart] = useState(semester?.startDate ?? "");
+  const [draftEnd, setDraftEnd] = useState(semester?.endDate ?? "");
+  const [draftLabel, setDraftLabel] = useState(semester?.label ?? "");
+  const [draftLastClassDate, setDraftLastClassDate] = useState(semester?.lastClassDate ?? "");
+  const [saved, setSaved] = useState(true);
+  const [isEditingLastClass, setIsEditingLastClass] = useState(false);
+
+  // Sync draft when semester loads from DB
+  useEffect(() => {
+    if (semester) {
+      setDraftStart(semester.startDate ?? "");
+      setDraftEnd(semester.endDate ?? "");
+      setDraftLabel(semester.label ?? "");
+      setDraftLastClassDate(semester.lastClassDate ?? "");
+      setSaved(true);
+    }
+  }, [semester?.startDate, semester?.endDate, semester?.label, semester?.lastClassDate]);
+
+  const isDirty =
+    draftStart !== (semester?.startDate ?? "") ||
+    draftEnd !== (semester?.endDate ?? "") ||
+    draftLabel !== (semester?.label ?? "") ||
+    draftLastClassDate !== (semester?.lastClassDate ?? "");
+
+  const handleSaveSemester = () => {
+    if (!draftStart || !draftEnd) {
+      toast.error("Please set both start and end dates.");
+      return;
+    }
+    if (draftEnd < draftStart) {
+      toast.error("End date must be after start date.");
+      return;
+    }
+    if (draftLastClassDate) {
+      if (draftLastClassDate < draftStart) {
+        toast.error("Last class date cannot be before start date.");
+        return;
+      }
+      if (draftLastClassDate > draftEnd) {
+        toast.error("Last class date cannot be after end date.");
+        return;
+      }
+    }
+    setSemester({
+      startDate: draftStart,
+      endDate: draftEnd,
+      label: draftLabel,
+      lastClassDate: draftLastClassDate || undefined,
+    });
+    setSaved(true);
+    toast.success("Semester settings saved!");
+  };
+
+  // ─── Last date of class ───────────────────────────────────────────────────
+  const autoLastClassDate = useMemo(
+    () => computeLastClassDate(draftEnd || semester?.endDate || "", blocks, holidays),
+    [draftEnd, semester?.endDate, blocks, holidays],
+  );
+
+  const activeLastClassDate = draftLastClassDate || autoLastClassDate;
+
+  const lastClassInfo = useMemo(() => {
+    if (!activeLastClassDate) return null;
+    const d = parseDateKey(activeLastClassDate);
+    const today = parseDateKey(todayKey());
+    const daysUntil = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+    const label = d.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+    return { dateKey: activeLastClassDate, label, daysUntil, isOverridden: !!draftLastClassDate };
+  }, [activeLastClassDate, draftLastClassDate]);
+
   const [day, setDay] = useState<RoutineBlock["day"]>("Mon");
   const [start, setStart] = useState("09:00");
   const [end, setEnd] = useState("10:00");
   const [location, setLocation] = useState("");
   const [courseId, setCourseId] = useState<string>("none");
+
+  // --- Weekly Schedule Grid and Notes Helpers ---
+  const timeSlots = useMemo(() => {
+    const slots = new Set<string>();
+    blocks.forEach((b) => {
+      if (b.start && b.end) {
+        slots.add(`${b.start} - ${b.end}`);
+      }
+    });
+
+    const sorted = Array.from(slots).sort((a, b) => {
+      const startA = a.split(" - ")[0];
+      const startB = b.split(" - ")[0];
+      return startA.localeCompare(startB);
+    });
+
+    if (sorted.length === 0) {
+      return [
+        "09:00 - 10:00",
+        "10:00 - 11:00",
+        "11:00 - 12:00",
+        "12:00 - 13:00",
+        "14:00 - 15:00",
+        "15:00 - 16:00",
+        "16:00 - 17:00",
+      ];
+    }
+    return sorted;
+  }, [blocks]);
+
+  const daysMap: Record<string, string> = {
+    Mon: "Monday",
+    Tue: "Tuesday",
+    Wed: "Wednesday",
+    Thu: "Thursday",
+    Fri: "Friday",
+    Sat: "Saturday",
+    Sun: "Sunday",
+  };
+
+  const columnsToDisplay = useMemo(() => {
+    const defaultDays: ("Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun")[] = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+    const hasSat = blocks.some((b) => b.day === "Sat");
+    const hasSun = blocks.some((b) => b.day === "Sun");
+
+    const display = [...defaultDays];
+    if (hasSat) display.push("Sat");
+    if (hasSun) display.push("Sun");
+    return display;
+  }, [blocks]);
+
+  const [rowNotes, setRowNotes] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem("routine_notes");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const handleNoteChange = (timeslot: string, val: string) => {
+    const updated = { ...rowNotes, [timeslot]: val };
+    setRowNotes(updated);
+    localStorage.setItem("routine_notes", JSON.stringify(updated));
+  };
+
+  const handleAddClassClick = (clickedDay: string, timeslot: string) => {
+    const [tOpen, tClose] = timeslot.split(" - ");
+    setDay(clickedDay as RoutineBlock["day"]);
+    setStart(tOpen);
+    setEnd(tClose);
+    
+    const el = document.getElementById("add-class-section");
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth" });
+    }
+  };
 
   const [holLabel, setHolLabel] = useState("");
   const [holStart, setHolStart] = useState("");
@@ -84,8 +272,6 @@ function RoutinePage() {
     setHolEnd("");
     toast.success("Holiday saved");
   };
-
-
 
   const blockLabel = (b: RoutineBlock) => {
     const c = courses.find((x) => x.id === b.courseId);
@@ -195,83 +381,79 @@ function RoutinePage() {
     <div className="space-y-6 animate-fade-in-up">
       <style>{`
         @media print {
-          body, html, #root, header, nav, button, select, input, form, section, aside {
-            visibility: hidden !important;
-            height: auto !important;
-            min-height: 0 !important;
-            overflow: visible !important;
+          /* Hide everything by default */
+          body * {
+            visibility: hidden;
           }
           
-          .print-title, .routine-grid-container, .routine-grid-container * {
+          /* Show the printable schedule card and its descendents */
+          .printable-schedule-card,
+          .printable-schedule-card * {
             visibility: visible !important;
           }
           
-          .print-title {
-            display: block !important;
-            text-align: center !important;
-            color: black !important;
-            font-size: 20pt !important;
-            font-weight: bold !important;
-            margin-bottom: 24pt !important;
-          }
-          
-          .routine-grid-container {
+          /* Position the card on the printing page */
+          .printable-schedule-card {
             position: absolute !important;
             left: 0 !important;
-            top: 60px !important;
+            top: 0 !important;
             width: 100% !important;
-            display: grid !important;
-            grid-template-columns: repeat(4, 1fr) !important;
-            gap: 12pt !important;
-          }
-
-          .routine-grid-container section {
-            border: 1px solid #dddddd !important;
-            border-radius: 8pt !important;
-            padding: 8pt !important;
-            background: #fafafa !important;
+            margin: 0 !important;
+            padding: 24px !important;
+            background-color: #B18CFE !important;
+            border-radius: 16px !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
             box-shadow: none !important;
           }
 
-          .routine-grid-container section h3 {
-            color: #333333 !important;
-            font-weight: bold !important;
-            border-bottom: 1px solid #cccccc !important;
-            padding-bottom: 4pt !important;
-            margin-bottom: 8pt !important;
+          /* Ensure table cells print with white background and borders */
+          .printable-schedule-card th {
+            background-color: #f9fafb !important;
+            color: #374151 !important;
+            border: 1.5px solid #B18CFE !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
 
-          .routine-grid-container li {
-            border: 1px solid #e2e8f0 !important;
-            background: white !important;
-            box-shadow: none !important;
-            border-radius: 6pt !important;
-            padding: 6pt !important;
-            color: black !important;
+          .printable-schedule-card td {
+            background-color: white !important;
+            color: #111827 !important;
+            border: 1.5px solid #B18CFE !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
 
-          .routine-grid-container li * {
-            color: black !important;
-          }
-
-          .routine-grid-container button {
+          /* Hide UI-only elements */
+          .no-print {
             display: none !important;
           }
 
+          .no-print-textarea {
+            display: none !important;
+          }
+
+          .print-notes-text {
+            display: block !important;
+          }
+
+          /* Page size and layout */
+          @page {
+            size: landscape;
+            margin: 10mm;
+          }
+
+          /* Reset margin and padding of body/main wrapper */
           html, body, main, [data-router-root] {
             height: auto !important;
             min-height: 0 !important;
             overflow: visible !important;
             margin: 0 !important;
-            padding: 20px !important;
+            padding: 0 !important;
             background: white !important;
           }
         }
       `}</style>
-
-      <h1 className="hidden print-title font-bold text-center text-black">
-        Weekly Class Routine — {semester?.label || "Schedule"}
-      </h1>
 
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -299,39 +481,220 @@ function RoutinePage() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-
-
         </div>
       </header>
 
       <section className="glass-strong rounded-3xl p-6">
-        <h2 className="text-lg font-semibold">Semester period</h2>
-        <p className="text-xs text-muted-foreground">Routine & attendance only apply within these dates.</p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="text-lg font-semibold">Semester period</h2>
+            <p className="text-xs text-muted-foreground">Routine &amp; attendance only apply within these dates.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {isDirty && (
+              <span className="flex items-center gap-1.5 text-xs text-[color:var(--warning)] font-medium">
+                <span className="h-2 w-2 rounded-full bg-[color:var(--warning)] animate-pulse" />
+                Unsaved changes
+              </span>
+            )}
+            {!isDirty && saved && semester?.startDate && (
+              <span className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Saved
+              </span>
+            )}
+            <Button
+              type="button"
+              onClick={handleSaveSemester}
+              disabled={!isDirty}
+              className="gap-2 bg-gradient-primary text-primary-foreground shadow-glow disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Save className="h-4 w-4" /> Save semester
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-2">
             <Label>Start date</Label>
             <Input
               type="date"
-              value={semester?.startDate ?? ""}
-              onChange={(e) => setSemester({ startDate: e.target.value })}
+              value={draftStart}
+              onChange={(e) => { setDraftStart(e.target.value); setSaved(false); }}
             />
           </div>
           <div className="space-y-2">
-            <Label>End date (3-month semester)</Label>
+            <Label>End date</Label>
             <Input
               type="date"
-              value={semester?.endDate ?? ""}
-              onChange={(e) => setSemester({ endDate: e.target.value })}
+              value={draftEnd}
+              onChange={(e) => { setDraftEnd(e.target.value); setSaved(false); }}
             />
           </div>
           <div className="space-y-2">
             <Label>Label</Label>
             <Input
-              value={semester?.label ?? ""}
-              onChange={(e) => setSemester({ label: e.target.value })}
+              value={draftLabel}
+              onChange={(e) => { setDraftLabel(e.target.value); setSaved(false); }}
               placeholder="Spring 2026"
             />
           </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Last class date</Label>
+              {draftLastClassDate && (
+                <button
+                  type="button"
+                  onClick={() => { setDraftLastClassDate(""); setSaved(false); }}
+                  className="text-[10px] text-primary hover:underline hover:text-primary/80 transition-colors"
+                >
+                  Clear override
+                </button>
+              )}
+            </div>
+            <Input
+              type="date"
+              value={draftLastClassDate}
+              onChange={(e) => { setDraftLastClassDate(e.target.value); setSaved(false); }}
+              placeholder="Default"
+            />
+          </div>
+        </div>
+
+        {/* Last Date of Class */}
+        <div className="mt-5 pt-5 border-t border-border/40">
+          <div className="flex items-center gap-2 mb-1">
+            <CalendarX className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold">Last Date of Class</span>
+          </div>
+          {lastClassInfo ? (
+            <div className="mt-2 flex flex-wrap items-center gap-4">
+              <div className="glass rounded-2xl px-5 py-3 flex flex-col min-w-[220px] relative group transition-all duration-300">
+                <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <span>Date</span>
+                  {lastClassInfo.isOverridden && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDraftLastClassDate("");
+                        setSaved(false);
+                      }}
+                      className="text-[10px] text-primary hover:underline hover:text-primary/80 transition-colors normal-case font-normal"
+                    >
+                      Reset to Default
+                    </button>
+                  )}
+                </div>
+                {isEditingLastClass ? (
+                  <div className="flex items-center gap-2 mt-1">
+                    <Input
+                      type="date"
+                      value={draftLastClassDate || activeLastClassDate || ""}
+                      onChange={(e) => {
+                        setDraftLastClassDate(e.target.value);
+                        setSaved(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          setIsEditingLastClass(false);
+                        }
+                      }}
+                      className="h-8 py-1 px-2 text-sm bg-background/50 border-border/50 text-foreground w-36"
+                      autoFocus
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setIsEditingLastClass(false)}
+                      className="h-8 px-2 text-xs"
+                    >
+                      Done
+                    </Button>
+                  </div>
+                ) : (
+                  <div
+                    className="flex items-center justify-between gap-2 mt-0.5 cursor-pointer hover:text-primary transition-colors"
+                    onClick={() => setIsEditingLastClass(true)}
+                  >
+                    <span className="text-lg font-semibold">{lastClassInfo.label}</span>
+                    <Pencil className="h-3.5 w-3.5 text-muted-foreground/60 hover:text-primary transition-colors ml-2" />
+                  </div>
+                )}
+              </div>
+              <div className={`glass rounded-2xl px-5 py-3 flex flex-col ${
+                lastClassInfo.daysUntil < 0 ? "border border-muted-foreground/20" :
+                lastClassInfo.daysUntil <= 7 ? "border border-destructive/30 bg-destructive/5" :
+                lastClassInfo.daysUntil <= 30 ? "border border-[color:var(--warning)]/30 bg-[color:var(--warning)]/5" :
+                "border border-emerald-500/20 bg-emerald-500/5"
+              }`}>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Countdown</span>
+                <span className={`text-lg font-bold mt-0.5 ${
+                  lastClassInfo.daysUntil < 0 ? "text-muted-foreground" :
+                  lastClassInfo.daysUntil <= 7 ? "text-destructive" :
+                  lastClassInfo.daysUntil <= 30 ? "text-[color:var(--warning)]" :
+                  "text-emerald-400"
+                }`}>
+                  {lastClassInfo.daysUntil < 0
+                    ? `${Math.abs(lastClassInfo.daysUntil)} days ago`
+                    : lastClassInfo.daysUntil === 0
+                    ? "Today!"
+                    : `${lastClassInfo.daysUntil} days away`}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-2 flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                {blocks.length === 0
+                  ? "Add classes to your routine to compute the last class date."
+                  : draftEnd
+                  ? "No class days found before the end date — check your routine and holidays."
+                  : "Set the semester end date above to compute the last class date."
+                }
+              </p>
+              <div className="mt-1">
+                {isEditingLastClass ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="date"
+                      value={draftLastClassDate}
+                      onChange={(e) => {
+                        setDraftLastClassDate(e.target.value);
+                        setSaved(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          setIsEditingLastClass(false);
+                        }
+                      }}
+                      className="h-8 py-1 px-2 text-sm bg-background/50 border-border/50 text-foreground w-40"
+                      autoFocus
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setIsEditingLastClass(false)}
+                      className="h-8 px-2 text-xs"
+                    >
+                      Done
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditingLastClass(true)}
+                    className="text-xs h-7 gap-1"
+                  >
+                    <Plus className="h-3 w-3" /> Set custom last date
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -383,7 +746,7 @@ function RoutinePage() {
         )}
       </section>
 
-      <section className="glass-strong rounded-3xl p-6">
+      <section id="add-class-section" className="glass-strong rounded-3xl p-6">
         <h2 className="text-lg font-semibold">Add weekly class</h2>
         <p className="text-xs text-muted-foreground">Pick the course — name comes from your course list.</p>
         {courses.length === 0 ? (
@@ -435,40 +798,114 @@ function RoutinePage() {
         )}
       </section>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 routine-grid-container">
-        {days.map((d) => {
-          const dayBlocks = blocks.filter((b) => b.day === d);
-          return (
-            <section key={d} className="glass-strong rounded-3xl p-4">
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{d}</h3>
-              {dayBlocks.length === 0 ? (
-                <p className="mt-3 text-xs text-muted-foreground">No blocks yet</p>
-              ) : (
-                <ul className="mt-3 space-y-2">
-                  {dayBlocks.map((b) => (
-                    <li key={b.id} className="group rounded-xl border border-border/60 bg-secondary/30 p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="text-xs text-[color:var(--cyan)]">{b.start} – {b.end}</div>
-                          <div className="text-sm font-medium">{blockLabel(b)}</div>
-                          {b.location && <div className="text-xs text-muted-foreground">{b.location}</div>}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeBlock(b.id)}
-                          className="rounded-lg p-1 text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive"
-                          aria-label="Remove"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          );
-        })}
+      <div className="printable-schedule-card bg-[#B18CFE] rounded-[24px] p-6 sm:p-8 text-white shadow-soft relative overflow-hidden">
+        <div className="mb-6">
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Weekly Class Schedule</h2>
+          {semester?.label && (
+            <p className="text-white/80 text-sm mt-1 font-medium">{semester.label}</p>
+          )}
+        </div>
+        
+        <div className="overflow-x-auto w-full rounded-2xl border border-[#B18CFE] bg-[#B18CFE]">
+          <table className="w-full border-collapse table-fixed min-w-[800px] bg-[#B18CFE]">
+            <thead>
+              <tr className="bg-white">
+                <th className="w-[120px] p-3 text-sm font-semibold text-gray-700 border border-[#B18CFE] text-center select-none">
+                  Time
+                </th>
+                {columnsToDisplay.map((d) => (
+                  <th key={d} className="p-3 text-sm font-semibold text-gray-700 border border-[#B18CFE] text-center select-none">
+                    {daysMap[d]}
+                  </th>
+                ))}
+                <th className="w-[180px] p-3 text-sm font-semibold text-gray-700 border border-[#B18CFE] text-center select-none">
+                  Notes
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {timeSlots.map((timeslot) => (
+                <tr key={timeslot}>
+                  {/* Time Cell */}
+                  <td className="p-3 bg-white text-sm font-bold text-gray-800 border border-[#B18CFE] text-center select-none">
+                    {timeslot}
+                  </td>
+                  
+                  {/* Day Cells */}
+                  {columnsToDisplay.map((d) => {
+                    const cellBlocks = blocks.filter(
+                      (b) => b.day === d && `${b.start} - ${b.end}` === timeslot
+                    );
+                    
+                    return (
+                      <td
+                        key={`${d}-${timeslot}`}
+                        className="p-3 bg-white text-gray-800 border border-[#B18CFE] align-middle relative group transition-colors duration-200 hover:bg-gray-50/50"
+                      >
+                        {cellBlocks.length > 0 ? (
+                          <div className="space-y-2">
+                            {cellBlocks.map((b) => (
+                              <div
+                                key={b.id}
+                                className="relative pr-6 group/block"
+                              >
+                                <div className="text-xs font-bold text-gray-900">
+                                  {b.courseCode || "CLASS"}
+                                </div>
+                                <div className="text-xs text-gray-700 line-clamp-2 leading-snug">
+                                  {b.title}
+                                </div>
+                                {b.location && (
+                                  <div className="text-[10px] text-gray-500 font-medium mt-0.5">
+                                    📍 {b.location}
+                                  </div>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    removeBlock(b.id);
+                                    toast.success("Removed class from routine");
+                                  }}
+                                  className="absolute right-0 top-0 rounded p-0.5 text-gray-400 opacity-0 group-hover/block:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive no-print"
+                                  aria-label="Remove"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleAddClassClick(d, timeslot)}
+                            className="absolute inset-0 flex items-center justify-center text-primary/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:text-primary hover:bg-primary/5 no-print"
+                            title="Add class at this time"
+                          >
+                            <Plus className="h-5 w-5" />
+                          </button>
+                        )}
+                      </td>
+                    );
+                  })}
+
+                  {/* Notes Cell */}
+                  <td className="p-2 bg-white text-gray-800 border border-[#B18CFE] align-middle relative">
+                    <textarea
+                      value={rowNotes[timeslot] ?? ""}
+                      onChange={(e) => handleNoteChange(timeslot, e.target.value)}
+                      placeholder="Add note..."
+                      rows={1}
+                      className="w-full text-xs bg-transparent border-none resize-none outline-none focus:ring-0 focus:outline-none placeholder-gray-400 text-center text-gray-700 p-1 no-print-textarea"
+                    />
+                    <div className="hidden print-notes-text text-center text-xs text-gray-700 leading-snug break-words max-w-full px-1">
+                      {rowNotes[timeslot] || ""}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

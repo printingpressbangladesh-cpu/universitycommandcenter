@@ -77,6 +77,7 @@ create table if not exists public.courses (
   progress int default 0,
   weak_topics jsonb default '[]',
   color text default '#6366f1',
+  target_attendance int default 75,
   created_at timestamptz default now()
 );
 
@@ -166,7 +167,9 @@ create table if not exists public.semester_settings (
   user_id uuid primary key references public.profiles (id) on delete cascade,
   start_date text not null,
   end_date text not null,
-  label text
+  label text,
+  target_weekly_study_minutes int default 600,
+  last_class_date text
 );
 
 create table if not exists public.holidays (
@@ -302,3 +305,67 @@ create policy "study_sessions_admin_select" on public.study_sessions for select 
 insert into public.system_config (key, data)
 values ('email', '{"enabled":false,"adminFormUrl":""}'::jsonb)
 on conflict (key) do nothing;
+
+-- 7. File Storage Tables (Assignment Attachments & Question Bank)
+CREATE TABLE IF NOT EXISTS public.assignment_attachments (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  assignment_id text NOT NULL REFERENCES public.assignments(id) ON DELETE CASCADE,
+  file_name text NOT NULL,
+  file_path text NOT NULL,
+  file_size int NOT NULL,
+  mime_type text NOT NULL,
+  created_at timestamptz DEFAULT now() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS assignment_attachments_assignment_idx ON public.assignment_attachments (assignment_id);
+
+CREATE TABLE IF NOT EXISTS public.question_bank (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  course_code text NOT NULL,
+  course_name text NOT NULL,
+  semester_label text,
+  exam_type text NOT NULL,
+  year int NOT NULL,
+  title text NOT NULL,
+  description text,
+  file_path text NOT NULL,
+  file_name text NOT NULL,
+  file_size int NOT NULL,
+  mime_type text NOT NULL,
+  tags jsonb DEFAULT '[]',
+  is_public boolean DEFAULT false,
+  downloads_count int DEFAULT 0,
+  created_at timestamptz DEFAULT now() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS question_bank_search_idx ON public.question_bank (course_code, exam_type, year);
+CREATE INDEX IF NOT EXISTS question_bank_sharing_idx ON public.question_bank (is_public);
+
+-- Enable RLS
+ALTER TABLE public.assignment_attachments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.question_bank ENABLE ROW LEVEL SECURITY;
+
+-- Policies
+CREATE POLICY "assignment_attachments_own" ON public.assignment_attachments FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "assignment_attachments_admin_select" ON public.assignment_attachments FOR SELECT USING (public.is_admin());
+
+CREATE POLICY "question_bank_select" ON public.question_bank FOR SELECT USING (is_public = true OR auth.uid() = user_id);
+CREATE POLICY "question_bank_own" ON public.question_bank FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "question_bank_admin" ON public.question_bank FOR ALL USING (public.is_admin());
+
+-- RPC Helper for atomic download counts increments
+CREATE OR REPLACE FUNCTION public.increment_downloads_counter(row_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER set search_path = public
+AS $$
+BEGIN
+  UPDATE public.question_bank
+  SET downloads_count = downloads_count + 1
+  WHERE id = row_id;
+END;
+$$;
+
+

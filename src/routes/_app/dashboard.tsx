@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import {
   CalendarCheck2, BookOpen, ClipboardList, Timer, ArrowUpRight, Flame, Quote, Plus,
+  AlertTriangle, Bell, TrendingDown, CheckCircle2, Zap,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useCourses } from "@/lib/coursesStore";
@@ -12,6 +13,9 @@ import { useAssignments } from "@/lib/assignmentsStore";
 import { useStudy } from "@/lib/studyStore";
 import { formatStudyMinutes } from "@/lib/scheduleUtils";
 import { motivationalQuotes } from "@/lib/constants";
+import { useSemester } from "@/lib/semesterStore";
+import { useExams } from "@/lib/examsStore";
+import { calculateSemesterProgress } from "@/lib/semesterTracker";
 
 export const Route = createFileRoute("/_app/dashboard")({
   component: Dashboard,
@@ -41,7 +45,9 @@ function Dashboard() {
   const { user } = useAuth();
   const { courses, ready } = useCourses();
   const { assignments } = useAssignments();
-  const { totalMinutesThisWeek } = useStudy();
+  const { totalMinutesThisWeek, analytics } = useStudy();
+  const { semester } = useSemester();
+  const { exams } = useExams();
   const name = (user?.user_metadata?.full_name as string) || user?.email?.split("@")[0] || "Student";
 
   const coursesWithAttendance = courses.filter((c) => c.totalClasses > 0);
@@ -71,6 +77,177 @@ function Dashboard() {
   const attendanceLabel = overallAttendance !== null ? `${overallAttendance}%` : "—";
   const isEmpty = ready && courses.length === 0;
 
+  const progressMetrics = useMemo(() => {
+    if (!semester) {
+      return {
+        percentComplete: 0,
+        daysRemaining: 0,
+        totalDays: 0,
+        activeAssignmentsCount: 0,
+        upcomingExamsCount: 0,
+        workloadScore: 0,
+        workloadStatus: "balanced" as const,
+      };
+    }
+    return calculateSemesterProgress(
+      semester.startDate,
+      semester.endDate,
+      assignments,
+      exams,
+      courses
+    );
+  }, [semester, assignments, exams, courses]);
+
+  const criticalAttendanceCourses = useMemo(() => {
+    return courses
+      .map((c) => {
+        const target = c.targetAttendance ?? 75;
+        const attended = c.attended;
+        const total = c.totalClasses;
+        const current = c.attendance;
+        const danger = current < target;
+
+        let mustAttend = 0;
+        if (danger && target / 100 < 1) {
+          mustAttend = Math.ceil(((target / 100) * total - attended) / (1 - target / 100));
+        } else if (danger) {
+          mustAttend = Infinity;
+        }
+
+        return {
+          ...c,
+          target,
+          danger,
+          mustAttend,
+        };
+      })
+      .filter((c) => c.danger && c.totalClasses > 0);
+  }, [courses]);
+
+  // ── Smart Insights Engine ───────────────────────────────────────────────────
+  type InsightLevel = "critical" | "warning" | "info" | "success";
+  interface Insight {
+    id: string;
+    level: InsightLevel;
+    title: string;
+    detail: string;
+    priority: number;
+  }
+
+  const insights = useMemo<Insight[]>(() => {
+    const items: Insight[] = [];
+    const now = Date.now();
+
+    // 1. Attendance risks
+    for (const c of courses) {
+      if (c.totalClasses === 0) continue;
+      const target = c.targetAttendance ?? 75;
+      if (c.attendance < target) {
+        const mustAttend = target / 100 < 1
+          ? Math.ceil(((target / 100) * c.totalClasses - c.attended) / (1 - target / 100))
+          : Infinity;
+        items.push({
+          id: `att-${c.id}`,
+          level: "critical",
+          title: `${c.code} attendance is below ${target}%`,
+          detail: mustAttend === Infinity
+            ? "Target is impossible to recover — speak to your advisor."
+            : `Attend next ${mustAttend} class${mustAttend !== 1 ? "es" : ""} consecutively to recover.`,
+          priority: 100,
+        });
+      }
+    }
+
+    // 2. Assignments due within 48 hours
+    const due48 = assignments.filter((a) => {
+      if (a.status === "done") return false;
+      const diff = +new Date(a.due) - now;
+      return diff > 0 && diff < 48 * 3600 * 1000;
+    });
+    if (due48.length > 0) {
+      items.push({
+        id: "due-48h",
+        level: "critical",
+        title: `${due48.length} assignment${due48.length > 1 ? "s" : ""} due within 48 hours`,
+        detail: due48.slice(0, 3).map((a) => a.title).join(", ") + (due48.length > 3 ? " …" : ""),
+        priority: 95,
+      });
+    }
+
+    // 3. Exams within 3 days
+    const exams3d = exams.filter((e) => {
+      if (e.status !== "upcoming") return false;
+      const diff = +new Date(e.date + "T00:00:00") - now;
+      return diff > 0 && diff < 3 * 86400 * 1000;
+    });
+    if (exams3d.length > 0) {
+      const course = courses.find((c) => c.id === exams3d[0].courseId);
+      items.push({
+        id: "exam-3d",
+        level: "critical",
+        title: `Exam in 3 days: ${course?.code ?? ""} — ${exams3d[0].title}`,
+        detail: "Final revision time! Focus on weak topics and past papers.",
+        priority: 90,
+      });
+    }
+
+    // 4. Study performance decline
+    const { totalThisWeek, totalLastWeek } = analytics;
+    if (totalLastWeek > 0 && totalThisWeek < totalLastWeek * 0.65) {
+      const drop = Math.round(((totalLastWeek - totalThisWeek) / totalLastWeek) * 100);
+      items.push({
+        id: "study-drop",
+        level: "warning",
+        title: `You studied ${drop}% less than last week`,
+        detail: `Last week: ${Math.round(totalLastWeek / 60)}h — This week: ${Math.round(totalThisWeek / 60)}h. Try a Pomodoro session today.`,
+        priority: 70,
+      });
+    }
+
+    // 5. Upcoming exam with no study logged for that course
+    const exams14d = exams.filter((e) => {
+      if (e.status !== "upcoming") return false;
+      const diff = +new Date(e.date + "T00:00:00") - now;
+      return diff > 0 && diff < 14 * 86400 * 1000;
+    });
+    for (const exam of exams14d) {
+      const studiedMin = analytics.minutesByCourse[exam.courseId] ?? 0;
+      if (studiedMin === 0) {
+        const course = courses.find((c) => c.id === exam.courseId);
+        items.push({
+          id: `no-study-${exam.id}`,
+          level: "warning",
+          title: `Exam prep needed: ${course?.code ?? ""} — ${exam.title}`,
+          detail: "No study sessions logged for this course yet. Start your revision today!",
+          priority: 65,
+        });
+      }
+    }
+
+    // 6. Low consistency
+    if (courses.length > 0 && analytics.consistencyScore < 30 && analytics.totalThisMonth > 0) {
+      items.push({
+        id: "low-consistency",
+        level: "info",
+        title: "Study consistency is low this month",
+        detail: `Only ${analytics.consistencyScore}% of days in the past 28 days had study time. Aim for daily sessions.`,
+        priority: 40,
+      });
+    }
+
+    // 7. Good news — all caught up
+    if (items.length === 0 && courses.length > 0) {
+      items.push({
+        id: "all-good",
+        level: "success",
+        title: "You're all caught up! 🎉",
+        detail: "No critical alerts. Keep up the great work and stay consistent.",
+        priority: 1,
+      });
+    }
+
+    return items.sort((a, b) => b.priority - a.priority).slice(0, 6);
+  }, [courses, assignments, exams, analytics]);
   return (
     <div className="space-y-6 animate-fade-in-up">
       <section className="glass-strong relative overflow-hidden rounded-3xl p-6 md:p-8">
@@ -103,11 +280,188 @@ function Dashboard() {
         </div>
       </section>
 
+      {/* Semester Progress & Workload Tracker */}
+      <section className="grid gap-6 md:grid-cols-3">
+        {/* Semester Progress Card */}
+        <div className="glass-strong rounded-3xl p-6 md:col-span-2 relative overflow-hidden flex flex-col justify-between">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              Semester Progress
+              <span className="text-xs font-normal text-muted-foreground">({semester?.label || `${semesterLabel} Semester`})</span>
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              {progressMetrics.daysRemaining} days remaining of {progressMetrics.totalDays} total days
+            </p>
+          </div>
+
+          <div className="my-5 space-y-2">
+            <div className="flex justify-between items-end">
+              <span className="text-3xl font-bold tracking-tight">{progressMetrics.percentComplete}%</span>
+              <span className="text-xs font-medium text-muted-foreground">Completed</span>
+            </div>
+            <div className="h-3 w-full overflow-hidden rounded-full bg-muted/50 p-[1px] border border-border/40">
+              <div
+                className="h-full rounded-full transition-all duration-500 ease-out bg-gradient-to-r from-blue-500 via-purple-500 to-cyan-500"
+                style={{ width: `${progressMetrics.percentComplete}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 border-t border-border/40 pt-4 text-center">
+            <div>
+              <span className="text-[10px] text-muted-foreground block uppercase tracking-wider">Remaining</span>
+              <strong className="text-lg font-semibold text-foreground">{progressMetrics.daysRemaining} Days</strong>
+            </div>
+            <div>
+              <span className="text-[10px] text-muted-foreground block uppercase tracking-wider">Pending Tasks</span>
+              <strong className="text-lg font-semibold text-foreground">{progressMetrics.activeAssignmentsCount}</strong>
+            </div>
+            <div>
+              <span className="text-[10px] text-muted-foreground block uppercase tracking-wider">Upcoming Exams</span>
+              <strong className="text-lg font-semibold text-foreground">{progressMetrics.upcomingExamsCount}</strong>
+            </div>
+          </div>
+        </div>
+
+        {/* Workload Meter Card */}
+        <div className="glass-strong rounded-3xl p-6 flex flex-col justify-between">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Academic Workload</h2>
+            <p className="text-xs text-muted-foreground">Overall stress and deadlines score</p>
+          </div>
+
+          <div className="my-3 flex flex-col items-center justify-center">
+            <div className="relative flex items-center justify-center h-28 w-28">
+              <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="40"
+                  className="stroke-muted/30"
+                  strokeWidth="8"
+                  fill="transparent"
+                />
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="40"
+                  className={`transition-all duration-500 ease-out ${
+                    progressMetrics.workloadStatus === "overloaded"
+                      ? "stroke-destructive"
+                      : progressMetrics.workloadStatus === "moderate"
+                        ? "stroke-warning"
+                        : "stroke-success"
+                  }`}
+                  strokeWidth="8"
+                  strokeDasharray={`${2 * Math.PI * 40}`}
+                  strokeDashoffset={`${2 * Math.PI * 40 * (1 - Math.min(1, (progressMetrics.workloadScore / 50)))}`}
+                  strokeLinecap="round"
+                  fill="transparent"
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-2xl font-bold tracking-tight">{progressMetrics.workloadScore}</span>
+                <span className="text-[9px] uppercase tracking-wider text-muted-foreground">SCORE</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center space-y-1">
+            <div className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider ${
+              progressMetrics.workloadStatus === "overloaded"
+                ? "bg-destructive/15 text-destructive"
+                : progressMetrics.workloadStatus === "moderate"
+                  ? "bg-warning/15 text-warning"
+                  : "bg-success/15 text-success"
+            }`}>
+              {progressMetrics.workloadStatus === "overloaded" ? "Overloaded" : progressMetrics.workloadStatus === "moderate" ? "Moderate" : "Balanced"}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {progressMetrics.workloadStatus === "overloaded"
+                ? "High workload! Prioritize studying and avoid taking on new tasks."
+                : progressMetrics.workloadStatus === "moderate"
+                  ? "Workload is moderate. Keep up with daily studies."
+                  : "Workload is balanced. Excellent time management!"
+              }
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Critical Attendance Alerts */}
+      {criticalAttendanceCourses.length > 0 && (
+        <section className="glass-strong border-destructive/20 bg-destructive/5 rounded-3xl p-5">
+          <div className="flex items-center gap-2 text-destructive mb-3">
+            <Flame className="h-5 w-5 animate-pulse" />
+            <h2 className="text-sm font-semibold uppercase tracking-wider">Critical Attendance Alerts</h2>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+            {criticalAttendanceCourses.map((c) => (
+              <div key={c.id} className="glass rounded-2xl p-4 flex flex-col justify-between border-destructive/10">
+                <div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold uppercase tracking-wider" style={{ color: c.color }}>{c.code}</span>
+                    <span className="text-xs font-semibold text-destructive">{c.attendance}% / {c.target}%</span>
+                  </div>
+                  <h3 className="text-sm font-medium mt-1 truncate">{c.name}</h3>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-3">
+                  {c.mustAttend === Infinity
+                    ? "Target is 100% and classes were missed; target is impossible."
+                    : `Attend next ${c.mustAttend} classes consecutively to recover.`}
+                </p>
+                <Link to="/courses/$courseId" params={{ courseId: c.id }} className="text-xs font-semibold text-primary hover:underline mt-2 self-start flex items-center gap-1">
+                  Adjust target / view advisor
+                </Link>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Smart Insights ── */}
+      {courses.length > 0 && insights.length > 0 && (
+        <section className="glass-strong rounded-3xl p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-primary shadow-glow">
+              <Zap className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold">Smart Insights</h2>
+              <p className="text-[11px] text-muted-foreground">AI-generated alerts & recommendations</p>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {insights.map((insight) => {
+              const colors = {
+                critical: { bg: "bg-destructive/10 border-destructive/25", icon: "text-destructive", dot: "bg-destructive" },
+                warning: { bg: "bg-[color:var(--warning)]/10 border-[color:var(--warning)]/25", icon: "text-[color:var(--warning)]", dot: "bg-[color:var(--warning)]" },
+                info: { bg: "bg-primary/10 border-primary/25", icon: "text-primary", dot: "bg-primary" },
+                success: { bg: "bg-emerald-500/10 border-emerald-500/25", icon: "text-emerald-400", dot: "bg-emerald-400" },
+              }[insight.level];
+              const Icon = insight.level === "critical" ? AlertTriangle
+                : insight.level === "warning" ? TrendingDown
+                : insight.level === "success" ? CheckCircle2
+                : Bell;
+              return (
+                <div key={insight.id} className={`flex items-start gap-3 rounded-2xl border p-4 ${colors.bg}`}>
+                  <div className={`mt-0.5 shrink-0 ${colors.icon}`}><Icon className="h-4 w-4" /></div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold leading-snug">{insight.title}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{insight.detail}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <StatCard label="Attendance" value={attendanceLabel} sub={courses.length ? "Across all courses" : "Log classes to track"} icon={CalendarCheck2} accent="var(--cyan)" />
         <StatCard label="Pending tasks" value={String(pending)} sub={courses.length ? `Across ${courses.length} courses` : "No assignments yet"} icon={ClipboardList} accent="var(--blue)" />
         <StatCard label="Courses" value={String(courses.length)} sub="This semester" icon={BookOpen} accent="var(--purple)" />
-        <StatCard label="Study this week" value={`${studyHours}h`} sub="Use study planner to log time" icon={Timer} accent="var(--success)" />
+        <StatCard label="Study this week" value={formatStudyMinutes(totalMinutesThisWeek)} sub="Use study planner to log time" icon={Timer} accent="var(--success)" />
       </section>
 
       <section className="grid gap-6 lg:grid-cols-3">

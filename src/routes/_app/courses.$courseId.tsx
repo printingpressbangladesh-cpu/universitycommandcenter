@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { isPastDate, daysUntilDate } from "@/lib/scheduleUtils";
 import type { ExamEntry } from "@/lib/types";
+import { calculatePrediction } from "@/lib/attendancePrediction";
 
 export const Route = createFileRoute("/_app/courses/$courseId")({
   component: CourseDetailPage,
@@ -25,6 +26,10 @@ function CourseDetailPage() {
 
   const { exams, addExam, markDone, setMark, removeExam } = useExams();
   const [topic, setTopic] = useState("");
+  
+  const prediction = course 
+    ? calculatePrediction(course.attended, course.totalClasses, course.targetAttendance ?? 75)
+    : calculatePrediction(0, 0, 75);
 
   const [isAddingExam, setIsAddingExam] = useState(false);
   const [examTitle, setExamTitle] = useState("");
@@ -178,6 +183,67 @@ function CourseDetailPage() {
         </div>
       </header>
 
+      {/* Attendance Advisor Card */}
+      <section className="glass-strong rounded-3xl p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">Attendance Advisor</h2>
+        </div>
+
+        <div className={`rounded-2xl border p-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between transition-all duration-300 ${
+          prediction.status === "danger" 
+            ? "border-destructive/30 bg-destructive/10" 
+            : prediction.status === "warning"
+              ? "border-warning/30 bg-warning/10"
+              : "border-success/30 bg-success/10"
+        }`}>
+          <div className="space-y-1">
+            <div className={`font-semibold flex items-center gap-2 text-xs uppercase tracking-wider ${
+              prediction.status === "danger"
+                ? "text-destructive"
+                : prediction.status === "warning"
+                  ? "text-warning"
+                  : "text-success"
+            }`}>
+              {prediction.status === "danger" ? "Attendance Risk" : prediction.status === "warning" ? "Warning" : "Safe Zone"}
+              <span className="relative flex h-2 w-2">
+                {prediction.status === "danger" && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                  prediction.status === "danger" 
+                    ? "bg-destructive" 
+                    : prediction.status === "warning"
+                      ? "bg-warning"
+                      : "bg-success"
+                }`}></span>
+              </span>
+            </div>
+            <p className="text-sm text-foreground/95">
+              {prediction.status === "danger"
+                ? prediction.mustAttendClassesCount === Infinity
+                  ? `You cannot reach your ${prediction.targetPercentage}% target attendance. Consider editing your target threshold.`
+                  : `You need to attend the next ${prediction.mustAttendClassesCount} consecutive classes to raise your attendance to ${prediction.targetPercentage}%.`
+                : prediction.canMissClassesCount === 0
+                  ? `You are exactly at your target limit of ${prediction.targetPercentage}%. Do not miss your next class.`
+                  : `You can miss ${prediction.canMissClassesCount} more class${prediction.canMissClassesCount > 1 ? 'es' : ''} before falling below your ${prediction.targetPercentage}% target.`
+              }
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4 border-t border-border/40 pt-3 md:border-t-0 md:pt-0">
+            <div className="text-left md:text-right">
+              <span className="text-[10px] text-muted-foreground block uppercase tracking-wider">Current</span>
+              <strong className="text-xl font-bold text-foreground">{prediction.currentPercentage}%</strong>
+            </div>
+            <div className="h-8 w-px bg-border/40" />
+            <div className="text-left md:text-right">
+              <span className="text-[10px] text-muted-foreground block uppercase tracking-wider">Target</span>
+              <strong className="text-xl font-bold text-foreground">{prediction.targetPercentage}%</strong>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="glass-strong rounded-3xl p-6 space-y-4">
         <div className="flex items-center justify-between gap-4">
