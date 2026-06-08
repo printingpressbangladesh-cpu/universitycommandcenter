@@ -188,23 +188,30 @@ export function SemesterProvider({ children }: { children: ReactNode }) {
             excuse: params.date !== today ? params.excuse?.trim() : undefined,
           };
 
+      let nextLogs: AttendanceLog[] = [];
       setAttendanceLogs((prev) => {
         const next = existing
           ? prev.map((l) => (l.id === existing.id ? entry : l))
           : [...prev, entry];
-        const stats = recalcCourseFromLogs(params.courseId, next);
-        void (async () => {
+        nextLogs = next;
+        return next;
+      });
+
+      void (async () => {
+        try {
           await upsertAttendanceLog(userId, entry);
+          const stats = recalcCourseFromLogs(params.courseId, nextLogs);
           const course = await getCourse(params.courseId);
           if (course) {
             const { userId: uid, ...rest } = course;
             await upsertCourse(uid, { ...rest, ...stats });
           }
-        })();
-        return next;
-      });
+          emitDataChanged();
+        } catch (err) {
+          console.error("Failed to save attendance:", err);
+        }
+      })();
 
-      emitDataChanged();
       return { ok: true };
     },
     [userId, attendanceLogs],
@@ -249,23 +256,30 @@ export function SemesterProvider({ children }: { children: ReactNode }) {
             excuse: params.date !== today ? params.excuse?.trim() : undefined,
           };
 
+      let nextLogs: AttendanceLog[] = [];
       setAttendanceLogs((prev) => {
         const next = existing
           ? prev.map((l) => (l.id === existing.id ? entry : l))
           : [...prev, entry];
-        const stats = recalcCourseFromLogs(params.courseId, next);
-        void (async () => {
+        nextLogs = next;
+        return next;
+      });
+
+      void (async () => {
+        try {
           await upsertAttendanceLog(userId, entry);
+          const stats = recalcCourseFromLogs(params.courseId, nextLogs);
           const course = await getCourse(params.courseId);
           if (course) {
             const { userId: uid, ...rest } = course;
             await upsertCourse(uid, { ...rest, ...stats });
           }
-        })();
-        return next;
-      });
+          emitDataChanged();
+        } catch (err) {
+          console.error("Failed to cancel class:", err);
+        }
+      })();
 
-      emitDataChanged();
       return { ok: true };
     },
     [userId, attendanceLogs],

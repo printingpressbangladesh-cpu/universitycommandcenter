@@ -126,6 +126,7 @@ create table if not exists public.study_sessions (
   course_id text references public.courses (id) on delete cascade,
   date date not null,
   minutes int not null,
+  reason text,
   completed_at timestamptz default now()
 );
 

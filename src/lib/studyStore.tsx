@@ -15,11 +15,11 @@ function daysAgoKey(n: number) {
   return dateKey(d);
 }
 
-/** Monday of a given week offset (0 = this week, -1 = last week) */
+/** Saturday of a given week offset (0 = this week, -1 = last week) */
 function weekStart(offset = 0) {
   const d = new Date();
   const day = d.getDay();
-  const diff = day === 0 ? 6 : day - 1;
+  const diff = (day + 1) % 7;
   d.setDate(d.getDate() - diff + offset * 7);
   d.setHours(0, 0, 0, 0);
   return dateKey(d);
@@ -55,7 +55,7 @@ export interface StudyAnalytics {
 
 type StudyContextValue = {
   sessions: StudySession[];
-  logFocusSession: (courseId: string, minutes: number) => void;
+  logFocusSession: (courseId: string, minutes: number, reason?: string) => void;
   minutesThisWeek: (courseId: string) => number;
   totalMinutesThisWeek: number;
   analytics: StudyAnalytics;
@@ -82,7 +82,7 @@ export function StudyProvider({ children }: { children: ReactNode }) {
   }, [reload]);
 
   const logFocusSession = useCallback(
-    (courseId: string, minutes: number) => {
+    (courseId: string, minutes: number, reason?: string) => {
       if (!userId || !courseId || minutes < 1) return;
       const entry: StudySession = {
         id: crypto.randomUUID(),
@@ -91,6 +91,7 @@ export function StudyProvider({ children }: { children: ReactNode }) {
         date: todayKey(),
         minutes,
         completedAt: new Date().toISOString(),
+        reason,
       };
       setSessions((prev) => [...prev, entry]);
       void insertStudySession(userId, entry);
@@ -147,18 +148,27 @@ export function StudyProvider({ children }: { children: ReactNode }) {
       .reduce((sum, s) => sum + s.minutes, 0);
 
     // Study streak: count consecutive days going back from today that had study time
+    // Skip Friday (weekend) without breaking the streak if the user did not study.
     let streak = 0;
     let day = 0;
     while (true) {
       const dk = daysAgoKey(day);
-      if (byDate[dk] && byDate[dk] > 0) {
+      const hasStudied = byDate[dk] && byDate[dk] > 0;
+      
+      if (hasStudied) {
         streak++;
         day++;
       } else if (day === 0) {
         // Today hasn't been studied yet — don't break streak for today, check yesterday
         day++;
       } else {
-        break;
+        // If it is Friday (weekend), we can skip it without breaking the streak
+        const dateObj = new Date(dk + "T00:00:00");
+        if (dateObj.getDay() === 5) {
+          day++;
+        } else {
+          break;
+        }
       }
     }
 

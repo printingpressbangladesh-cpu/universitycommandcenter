@@ -43,7 +43,7 @@ function ordinal(n: number) {
 export function weekStartKey() {
   const d = new Date();
   const day = d.getDay();
-  const diff = day === 0 ? 6 : day - 1;
+  const diff = (day + 1) % 7;
   d.setDate(d.getDate() - diff);
   d.setHours(0, 0, 0, 0);
   return dateKey(d);

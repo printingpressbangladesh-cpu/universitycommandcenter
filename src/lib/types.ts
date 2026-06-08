@@ -121,6 +121,7 @@ export type StudySession = {
   date: string; // YYYY-MM-DD
   minutes: number;
   completedAt: string;
+  reason?: string;
 };
 
 export type CalendarEvent = {

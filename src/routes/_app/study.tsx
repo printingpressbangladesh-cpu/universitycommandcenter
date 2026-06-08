@@ -18,6 +18,7 @@ import { playTimerEndSound } from "@/lib/timerSound";
 import { CourseSelect } from "@/components/CourseSelect";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/study")({
@@ -543,6 +544,82 @@ function StudyAnalyticsTab() {
         </div>
       )}
 
+      {/* Recent Study Sessions Log */}
+      {sessions.length > 0 && (
+        <div className="glass-strong rounded-3xl p-6 space-y-4">
+          <div>
+            <h2 className="text-base font-semibold flex items-center gap-2">
+              <Clock className="h-4 w-4 text-primary" /> Recent Study Sessions
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Logs of your completed and partial study sessions</p>
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-border/60 bg-secondary/15">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border/40 bg-secondary/35 text-muted-foreground text-[10px] font-bold uppercase tracking-wider">
+                    <th className="px-4 py-3">Subject</th>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Duration</th>
+                    <th className="px-4 py-3">Session Note</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {sessions
+                    .slice()
+                    .sort((a, b) => b.completedAt.localeCompare(a.completedAt))
+                    .slice(0, 10)
+                    .map((s) => {
+                      const course = courses.find((c) => c.id === s.courseId);
+                      return (
+                        <tr key={s.id} className="hover:bg-secondary/10 transition-colors">
+                          <td className="px-4 py-3 font-semibold">
+                            {course ? (
+                              <span
+                                className="rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wider"
+                                style={{
+                                  background: `color-mix(in oklab, ${course.color} 20%, transparent)`,
+                                  color: course.color,
+                                }}
+                              >
+                                {course.code}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {new Date(s.completedAt).toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </td>
+                          <td className="px-4 py-3 font-medium">
+                            {s.minutes} min
+                          </td>
+                          <td className="px-4 py-3 text-xs">
+                            {s.reason ? (
+                              <span className="inline-flex items-center gap-1 rounded bg-destructive/15 text-destructive px-2 py-0.5 border border-destructive/20 font-medium">
+                                Early Reset: {s.reason}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 rounded bg-[color:var(--success)]/15 text-[color:var(--success)] px-2 py-0.5 border border-[color:var(--success)]/20 font-medium">
+                                Completed Session
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {courses.length === 0 && (
         <div className="glass-strong rounded-3xl p-12 text-center border border-border/40">
           <BarChart3 className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
@@ -556,7 +633,7 @@ function StudyAnalyticsTab() {
 
 function StudyPage() {
   const { courses } = useCourses();
-  const { logFocusSession, minutesThisWeek, totalMinutesThisWeek } = useStudy();
+  const { logFocusSession, minutesThisWeek, totalMinutesThisWeek, analytics, sessions: allSessions } = useStudy();
   const [activeTab, setActiveTab] = useState<"timer" | "plan" | "analytics">("timer");
   const [subjectId, setSubjectId] = useState("none");
   const [mode, setMode] = useState<Mode>("focus");
@@ -570,8 +647,11 @@ function StudyPage() {
   const [seconds, setSeconds] = useState(durations.focus);
   const [running, setRunning] = useState(false);
   const [sessions, setSessions] = useState(0);
-  const [streak] = useState(0);
+  const streak = analytics.streak;
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [earlyResetOpen, setEarlyResetOpen] = useState(false);
+  const [earlyResetReason, setEarlyResetReason] = useState("");
+  const [earlyResetBreak, setEarlyResetBreak] = useState(true);
 
   const timerPanelRef = useRef<HTMLElement>(null);
   const subjectIdRef = useRef(subjectId);
@@ -673,6 +753,49 @@ function StudyPage() {
     handledZeroRef.current = false;
     setRunning(false);
     setSeconds(durations[mode]);
+  };
+
+  const handleResetClick = () => {
+    const elapsedSeconds = durations.focus - seconds;
+    if (mode === "focus" && elapsedSeconds >= 10 && subjectId !== "none") {
+      setRunning(false);
+      setEarlyResetReason("");
+      setEarlyResetBreak(true);
+      setEarlyResetOpen(true);
+    } else {
+      reset();
+    }
+  };
+
+  const saveAndReset = () => {
+    const elapsedSeconds = durations.focus - seconds;
+    const elapsedMinutes = Math.max(1, Math.round(elapsedSeconds / 60));
+    
+    if (subjectId !== "none") {
+      logFocusSession(subjectId, elapsedMinutes, earlyResetReason.trim() || undefined);
+      const course = courses.find((c) => c.id === subjectId);
+      toast.success(
+        course
+          ? `Logged ${elapsedMinutes} min of focus for ${course.code}`
+          : `Logged ${elapsedMinutes} min of focus`,
+      );
+    }
+    
+    setEarlyResetOpen(false);
+    
+    if (earlyResetBreak) {
+      setMode("break");
+      setSeconds(breakMin * 60);
+      setRunning(true);
+      toast.info("Break started automatically");
+    } else {
+      reset();
+    }
+  };
+
+  const discardAndReset = () => {
+    setEarlyResetOpen(false);
+    reset();
   };
 
   const total = durations[mode];
@@ -905,7 +1028,7 @@ function StudyPage() {
             </button>
             <button
               type="button"
-              onClick={reset}
+              onClick={handleResetClick}
               className="inline-flex items-center gap-2 rounded-xl border border-border/60 bg-secondary/40 px-5 py-3 text-sm font-medium hover:bg-secondary"
             >
               <RotateCcw className="h-4 w-4" /> Reset
@@ -944,9 +1067,27 @@ function StudyPage() {
             </div>
             <p className="mt-3 text-xs text-muted-foreground">Streak builds when you study daily — starts at zero.</p>
             <div className="mt-3 grid grid-cols-7 gap-1">
-              {Array.from({ length: 28 }).map((_, i) => (
-                <div key={i} className="aspect-square rounded" style={{ background: "oklch(1 0 0 / 0.05)" }} />
-              ))}
+              {Array.from({ length: 28 }, (_, i) => {
+                const d = new Date();
+                d.setDate(d.getDate() - (27 - i));
+                const dk = dateKey(d);
+                const mins = allSessions.filter((s) => s.date === dk).reduce((acc, s) => acc + s.minutes, 0);
+                const intensity = mins === 0 ? 0 : mins < 30 ? 1 : mins < 60 ? 2 : mins < 120 ? 3 : 4;
+                const bg = intensity === 0
+                  ? "oklch(1 0 0 / 0.05)"
+                  : intensity === 1 ? "oklch(0.7 0.18 265 / 0.25)"
+                  : intensity === 2 ? "oklch(0.7 0.18 265 / 0.5)"
+                  : intensity === 3 ? "oklch(0.7 0.18 265 / 0.75)"
+                  : "oklch(0.7 0.18 265)";
+                return (
+                  <div
+                    key={dk}
+                    title={`${dk}: ${mins > 0 ? formatStudyMinutes(mins) : "No study"}`}
+                    className="aspect-square rounded"
+                    style={{ background: bg }}
+                  />
+                );
+              })}
             </div>
           </div>
 
@@ -976,6 +1117,88 @@ function StudyPage() {
           </div>
         </section>
       </div>}
+
+      <Dialog open={earlyResetOpen} onOpenChange={setEarlyResetOpen}>
+        <DialogContent className="glass-strong max-w-md rounded-3xl border-border/60">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold text-primary">Focus Session Reset</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2 text-left">
+            <p className="text-sm text-muted-foreground">
+              You have studied for <strong className="text-foreground">{Math.max(1, Math.round((durations.focus - seconds) / 60))} minute(s)</strong>. Do you want to save this progress?
+            </p>
+
+            <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-secondary/20 px-4 py-3">
+              <div>
+                <div className="text-sm font-medium">Do you need a break?</div>
+                <div className="text-[11px] text-muted-foreground">Automatically start the break timer after saving</div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={earlyResetBreak}
+                onClick={() => setEarlyResetBreak(!earlyResetBreak)}
+                className={`relative inline-flex h-6 w-11 rounded-full transition-colors cursor-pointer ${
+                  earlyResetBreak ? "bg-gradient-primary" : "bg-secondary"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 translate-y-1 rounded-full bg-white shadow transition-transform ${
+                    earlyResetBreak ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Why are you resetting early?
+              </Label>
+              <Input
+                value={earlyResetReason}
+                onChange={(e) => setEarlyResetReason(e.target.value)}
+                placeholder="e.g. Interrupted, fatigued, finished topic early..."
+                className="h-10 rounded-xl"
+              />
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {["Interrupted 📞", "Fatigued 🥱", "Finished early 🏁", "Distracted 📱"].map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setEarlyResetReason(tag)}
+                    className="rounded-full border border-border/60 bg-secondary/40 px-3 py-1 text-xs hover:bg-secondary cursor-pointer"
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setEarlyResetOpen(false)}
+              className="inline-flex items-center justify-center h-10 rounded-xl border border-border/60 bg-transparent px-4 text-sm font-semibold hover:bg-secondary transition cursor-pointer"
+            >
+              Keep Focus
+            </button>
+            <button
+              type="button"
+              onClick={discardAndReset}
+              className="inline-flex items-center justify-center h-10 rounded-xl border border-destructive/40 text-destructive bg-destructive/10 px-4 text-sm font-semibold hover:bg-destructive/20 transition cursor-pointer"
+            >
+              Discard & Reset
+            </button>
+            <button
+              type="button"
+              onClick={saveAndReset}
+              className="inline-flex items-center justify-center h-10 rounded-xl bg-gradient-primary px-5 text-sm font-semibold text-primary-foreground shadow-glow hover:opacity-90 transition cursor-pointer"
+            >
+              Save & Reset
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

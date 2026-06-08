@@ -246,6 +246,7 @@ export function rowToStudySession(r: Record<string, unknown>): StudySession {
     date: (r.date as string).slice(0, 10),
     minutes: Number(r.minutes),
     completedAt: r.completed_at as string,
+    reason: (r.reason as string) || undefined,
   };
 }
 
@@ -257,6 +258,7 @@ export function studySessionToRow(userId: string, s: StudySession) {
     date: s.date,
     minutes: s.minutes,
     completed_at: s.completedAt,
+    reason: s.reason ?? null,
   };
 }
 
